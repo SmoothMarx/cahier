@@ -1,0 +1,11 @@
+{
+  "name": "cahier-hub",
+  "label": "Cahiers",
+  "description": "Read-only cahier index: every active cahier with its state, saves, deadline, PIN flags and served link. Iterates through cahier_ctl.py (the same path the CLI uses).",
+  "version": "0.1.0",
+  "icon": "notebook",
+  "api": "plugin_api.py",
+  "tab": {
+    "hidden": true
+  }
+}
