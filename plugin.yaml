@@ -1,5 +1,5 @@
 name: cahier-hub
-version: "0.1.0"
+version: "0.1.1"
 description: "Every cahier in one sidebar page — live + pending first, with saves, deadlines, PIN flags and the served link. Read-only: iterates through cahier_ctl.py so the panel and the CLI can never disagree. Zero API keys, zero model tokens."
 author: hermes
 kind: standalone

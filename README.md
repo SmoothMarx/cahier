@@ -71,8 +71,13 @@ Runs both halves against real data, no fixtures-by-hand:
 
 1. **Backend contract suite** (pytest, real FastAPI app + real router) — health,
    scope equality with `cahier_ctl.iteration()`, no dropped/double slugs, stable
-   order across calls, and a read-only proof that the hashes of
-   `cahier-registry.json` and `cahier-answers.db` are unchanged by a request.
+   order across calls, a read-only proof that the hashes of
+   `cahier-registry.json` and `cahier-answers.db` are unchanged by a request, and
+   **cross-implementation parity**: the panel's slug set must equal
+   `GET /fleet/cahiers` on the bridge exactly — a slug visible in one and not the
+   other is a cahier the user either can't see or can't open. That half skips
+   cleanly when `:8766` isn't listening (override the URL with
+   `CAHIER_HUB_BRIDGE=`), so a stopped optional service never turns the suite red.
 2. **Panel harness** (Node, SDK stubbed, real backend payload) — `register()`
    wires one sidebar row and one route, the page renders every cahier the
    backend sent exactly once, "Open" hands the served URL to the OS, "Copy link"

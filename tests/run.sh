@@ -19,7 +19,7 @@ echo "== control plane: cahier_ctl iteration =="
 python3 -m py_compile "$HOME/.hermes/scripts/cahier_ctl.py" && echo "  compile OK"
 
 echo "== backend contract tests =="
-"$VENV_PY" -m pytest "$PLUGIN/tests/test_cahier_hub.py" -q
+"$VENV_PY" -m pytest "$PLUGIN/tests" -q
 
 echo "== panel harness (real payload, stubbed SDK) =="
 for scope in active all; do
