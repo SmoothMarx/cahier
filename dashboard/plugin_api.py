@@ -1,13 +1,16 @@
-"""Cahier Hub — read-only backend for the desktop sidebar page.
+"""Cahier Hub — backend for the desktop sidebar page.
 
 Every number the panel shows comes from ``cahier_ctl.iteration()``: the same
 read-only call the CLI's ``list`` subcommand uses, so the page and the terminal
 can never disagree about what a cahier IS.
 
-This module never writes — not to the share directory, not to the registry, not
-to the answers DB. When ``cahier_ctl.py`` cannot be imported it degrades to the
-registry file alone and says so in ``integrity.warnings`` instead of pretending
-the list is complete.
+GETs never write — not to the share directory, not to the registry, not to the
+answers DB. The single exception is ``POST /filing``, where a human clicks ✎ and
+says which profile/project a cahier belongs to; it goes through
+``cahier_ctl.set_filing`` (validated, atomic, logged) so a panel edit and a
+hand-edit of the same file are the same operation. When ``cahier_ctl.py`` cannot
+be imported it degrades to the registry file alone and says so in
+``integrity.warnings`` instead of pretending the list is complete.
 """
 
 from __future__ import annotations
@@ -22,9 +25,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 BRIDGE_PORT = int(os.environ.get("CAHIER_HUB_BRIDGE_PORT") or 8766)
 CACHE_TTL = float(os.environ.get("CAHIER_HUB_CACHE_TTL") or 5.0)
 PROBE_TTL = 10.0
@@ -74,6 +77,17 @@ def _registry_path() -> Path:
     return Path(stored) if stored else _home() / "state" / "cahier-registry.json"
 
 
+def _groups_path() -> Path:
+    """Where the human's filings live. Same precedence as the control plane, so the
+    panel can never write a file the resolver does not read."""
+    env = os.environ.get("CAHIER_HUB_GROUPS")
+    if env:
+        return Path(env)
+    module = ctl()
+    stored = getattr(module, "GROUPS", None) if module else None
+    return Path(stored) if stored else _home() / "state" / "cahier-groups.json"
+
+
 def _degraded_payload(scope: str) -> dict:
     """No control plane: the registry file is all we have, and we say so."""
     path = _registry_path()
@@ -113,6 +127,10 @@ def _degraded_payload(scope: str) -> dict:
             "page_pin": bool(pin.get("page_pin")),
             "first_seen": ent.get("first_seen") or "",
             "last_change": ent.get("last_change") or "",
+            "profile": ent.get("profile") or "",
+            "project": ent.get("project") or "",
+            "profile_source": ent.get("profile_source") or "",
+            "project_source": ent.get("project_source") or "",
             "in_registry": True,
         })
 
@@ -128,6 +146,7 @@ def _degraded_payload(scope: str) -> dict:
         "states": states,
         "shown": len(picked),
         "rows": picked,
+        "vocab": {"profiles": [], "projects": []},
         "counts": {s: sum(1 for r in rows if r["state"] == s) for s in
                    ("live", "pending", "finished", "stopped", "unknown")} | {"total": len(rows)},
         "registry": {"path": str(path), "updated": reg.get("updated", ""), "entries": len(book)},
@@ -248,3 +267,43 @@ def one_cahier(request: Request, slug: str = Query(..., min_length=1)) -> dict:
         if row["slug"] == slug:
             return {"generated_at": data["generated_at"], **_link_rows([row], base)[0]}
     raise HTTPException(status_code=404, detail=f"no cahier with slug {slug!r}")
+
+
+@router.post("/filing")
+def set_filing(request: Request, body: dict = Body(...)) -> dict:
+    """The ONE write this backend performs, and only because a human asked.
+
+    The panel's ✎ is the only caller. The write goes through
+    ``cahier_ctl.set_filing`` — validated slug, atomic rename, logged to the
+    control log — so a panel edit and a hand-edit of the same file are the same
+    operation, and an unknown slug is refused instead of inventing an entry.
+    Sending an empty string for a field FORGETS that override.
+    """
+    module = ctl()
+    if module is None:
+        raise HTTPException(status_code=503,
+                           detail="cahier_ctl.py is unavailable — refusing to write a filing blind")
+    slug = str((body or {}).get("slug") or "").strip()
+    if not slug:
+        raise HTTPException(status_code=400, detail="slug is required")
+    listed = {r["slug"] for r in payload("all")["rows"]}
+    if slug not in listed:
+        raise HTTPException(status_code=404, detail=f"no cahier with slug {slug!r}")
+    payload_body = body or {}
+    for field in ("profile", "project"):
+        value = payload_body.get(field)
+        if value is not None and len(str(value)) > 64:
+            raise HTTPException(status_code=400, detail=f"{field} is longer than 64 characters")
+    result = module.set_filing(
+        slug,
+        profile=payload_body.get("profile"),
+        project=payload_body.get("project"),
+        clear=bool(payload_body.get("clear")),
+        actor="panel",
+        path=_groups_path(),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "filing rejected")
+    _cache.clear()  # the very next GET must show the new grouping, not a 5s-old one
+    return {**result, "row": one_cahier(request, slug=slug), "written_by": "panel"}
+

@@ -6,8 +6,12 @@
  *   - the page renders EVERY cahier the backend sent (nothing dropped);
  *   - no slug appears twice;
  *   - two renders produce identical text (deterministic);
- *   - "Open" hands the served URL to the app's native opener, "Copy link" to
- *     the clipboard — i.e. the access story actually works.
+ *   - grouping buckets the same rows by profile ▸ project (or project / flat)
+ *     without dropping one, and switching the grouping restores the default;
+ *   - "Open" frames the served URL in this window, "Browser" is the escape
+ *     hatch to the real browser, "Copy link" hits the clipboard;
+ *   - a row's ✎ POSTs the human's profile/project to /filing — and that POST is
+ *     the ONLY non-read call the page ever makes.
  *
  *   node tests/plugin_harness.mjs <fixture.json>
  *
@@ -70,9 +74,9 @@ export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'sidebar-nav'
 export const cn = (...a) => a.flat().filter(Boolean).join(' ')
 export const Badge = p => jsx('span', { children: p.children })
-export const Codicon = p => jsx('span', { title: p.title, children: null })
-export const Button = p => jsx('button', { onClick: p.onClick, title: p.title, children: p.children })
-export const Input = p => jsx('input', { value: p.value, placeholder: p.placeholder })
+export const Codicon = p => jsx('span', { title: p.title, name: p.name, children: null })
+export const Button = p => jsx('button', { ...p })
+export const Input = p => jsx('input', { ...p })
 export const ScrollArea = p => jsx('div', { children: p.children })
 export const Separator = () => jsx('hr', {})
 export const Skeleton = () => jsx('div', {})
@@ -106,11 +110,17 @@ Object.defineProperty(globalThis, 'navigator', {
 
 const registered = []
 const opened = []
-const requested = []
+const calls = []
+const store = new Map()
 const ctx = {
   register: c => registered.push(c),
-  rest: async p => { requested.push(p); return fixture },
-  os: { openExternal: u => opened.push(u) }
+  rest: async (p, opts) => { calls.push({ path: p, opts: opts || {} }); return fixture },
+  os: { openExternal: u => opened.push(u) },
+  storage: {
+    get: (k, d) => (store.has(k) ? store.get(k) : d),
+    set: (k, v) => store.set(k, v),
+    remove: k => store.delete(k)
+  }
 }
 
 const plugin = (await import(pathToFileURL(pluginCopy).href)).default
@@ -190,26 +200,137 @@ check(text2 === text, 'two renders are byte-identical (deterministic)')
 
 check(String(nav[0].data.label) === 'Cahiers', 'nav label is the human door name')
 
+const buttonsIn = (node, label) => {
+  const out = []
+  walk(node, n => { if (n.type === 'button' && textOf(n.props.children).join('') === label) out.push(n) })
+  return out
+}
+const slugsIn = node => {
+  const out = []
+  walk(node, n => { if (n.props && n.props['data-slug']) out.push(n.props['data-slug']) })
+  return out
+}
+const groupsIn = node => {
+  const out = []
+  walk(node, n => { if (n.props && n.props['data-group']) out.push(n.props['data-group']) })
+  return out
+}
+const rerender = () => { react.__reset(); return expand(routes[0].render()) }
+
 const buttons = []
 walk(tree, n => { if (n.type === 'button') buttons.push(n) })
-const openButtons = buttons.filter(b => textOf(b.props.children).join('') === 'Open')
 const withUrl = fixture.rows.filter(r => r.url)
+
+/* ------------------------------------------- grouping: profile ▸ project (default) */
+
+check(groupsIn(tree).length > 0, 'rows are bucketed into groups by default',
+  `${groupsIn(tree).length} groups`)
+const profiles = [...new Set(fixture.rows.map(r => r.profile || 'no profile'))]
+const projects = [...new Set(fixture.rows.map(r => r.project || 'no project'))]
+const missingProfiles = profiles.filter(p => !text.includes(p))
+check(missingProfiles.length === 0, 'every profile in the payload has a group header',
+  missingProfiles.length ? `missing ${missingProfiles.join(',')}` : `${profiles.length} profiles`)
+const missingProjects = projects.filter(p => !text.includes(p))
+check(missingProjects.length === 0, 'every project shows as a sub-group',
+  missingProjects.length ? `missing ${missingProjects.join(',')}` : `${projects.length} projects`)
+
+const flatPill = buttonsIn(tree, 'Flat')[0]
+check(Boolean(flatPill), 'the grouping control offers Flat')
+if (flatPill) {
+  flatPill.props.onClick()
+  const flat = rerender()
+  check(groupsIn(flat).length === 0, 'Flat drops the group headers')
+  check(slugsIn(flat).length === fixture.rows.length, 'Flat keeps every cahier',
+    `${slugsIn(flat).length}/${fixture.rows.length}`)
+  check(store.get('groupBy') === 'none', 'the chosen grouping is remembered')
+}
+
+const backPill = buttonsIn(tree, 'Profile ▸ Project')[0]
+if (backPill) backPill.props.onClick()
+const regrouped = rerender()
+check(groupsIn(regrouped).length === groupsIn(tree).length,
+  'switching back restores the profile ▸ project grouping', `${groupsIn(regrouped).length} groups`)
+check(slugsIn(regrouped).length === fixture.rows.length,
+  'grouping never drops a cahier', `${slugsIn(regrouped).length}/${fixture.rows.length}`)
+
+/* ------------------------------------------------- reading a cahier in-window */
+
+const openButtons = buttonsIn(regrouped, 'Open')
 check(openButtons.length === withUrl.length, 'one Open per served cahier',
   `${openButtons.length} buttons for ${withUrl.length} urls`)
 
 if (openButtons.length) {
   openButtons[0].props.onClick()
-  check(opened.length === 1 && opened[0] === withUrl[0].url, 'Open calls the native opener with the served URL', opened[0])
+  const viewer = rerender()
+  let frame = null
+  walk(viewer, n => { if (n.type === 'iframe') frame = n })
+  check(Boolean(frame), 'Open frames the cahier in this window (no browser tab)')
+  check(Boolean(frame) && withUrl.some(r => r.url === frame.props.src),
+    'the frame points at a served URL', frame && frame.props.src)
+  check(slugsIn(viewer).length === 0, 'the viewer replaces the list')
+
+  const browserBtn = buttonsIn(viewer, 'Browser')[0]
+  check(Boolean(browserBtn), 'the browser stays one click away')
+  if (browserBtn && frame) {
+    browserBtn.props.onClick()
+    check(opened.length === 1 && opened[0] === frame.props.src,
+      'Browser hands the same URL to the native opener', opened[0])
+  }
+
+  const backBtn = buttonsIn(viewer, 'Cahiers')[0]
+  check(Boolean(backBtn), 'the viewer keeps a way back to the list')
+  if (backBtn) {
+    backBtn.props.onClick()
+    const listAgain = rerender()
+    check(slugsIn(listAgain).length === fixture.rows.length, 'back returns to the full list',
+      `${slugsIn(listAgain).length}/${fixture.rows.length}`)
+  }
 }
 
-const copyButtons = buttons.filter(b => String(b.props.title || '').startsWith('http'))
+const copyButtons = buttonsIn(regrouped, 'Copy link')
 if (copyButtons.length) {
   await copyButtons[0].props.onClick()
-  check(clipboard.length === 1 && clipboard[0] === copyButtons[0].props.title,
-    'Copy link writes the served URL to the clipboard', clipboard[0])
+  check(clipboard.length === 1, 'Copy link writes the served URL to the clipboard', clipboard[0])
 }
 
-check(requested.every(p => p.startsWith('/list')), 'page only ever GETs /list', requested.join(','))
+/* ----------------------------------------- filing: the panel's only write path */
+
+const rowSlug = fixture.rows[0].slug
+let editBtn = null
+walk(regrouped, n => { if (n.props && n.props['data-edit'] === rowSlug) editBtn = n })
+check(Boolean(editBtn), 'every row offers the ✎ filing edit', rowSlug)
+
+if (editBtn) {
+  editBtn.props.onClick()
+  const editor = rerender()
+  // Target the editor's own fields: the header's filter box is also an <input>.
+  const inputs = []
+  walk(editor, n => { if (n.type === 'input' && String(n.props['aria-label'] || '').startsWith('Profile for')) inputs.push(n) })
+  walk(editor, n => { if (n.type === 'input' && String(n.props['aria-label'] || '').startsWith('Project for')) inputs.push(n) })
+  check(inputs.length === 2, 'the editor asks for profile + project', `${inputs.length} fields`)
+  if (inputs.length >= 2) {
+    inputs[0].props.onChange({ target: { value: 'dobbs' } })
+    inputs[1].props.onChange({ target: { value: 'Pharmacy' } })
+    const saveBtn = buttonsIn(rerender(), 'Save')[0]
+    check(Boolean(saveBtn), 'the editor has a Save button')
+    if (saveBtn) {
+      await saveBtn.props.onClick()
+      const post = calls.find(c => c.path === '/filing')
+      check(Boolean(post), 'Save POSTs to /filing')
+      check(Boolean(post) && post.opts.method === 'POST', 'the write names its method',
+        post && String(post.opts.method))
+      check(Boolean(post) && post.opts.body && post.opts.body.slug === rowSlug
+        && post.opts.body.profile === 'dobbs' && post.opts.body.project === 'Pharmacy',
+        'the write carries the slug and the human labels', JSON.stringify(post && post.opts.body))
+    }
+  }
+}
+
+const writes = calls.filter(c => c.path !== '/list')
+check(writes.every(c => c.path === '/filing' && c.opts.method === 'POST'),
+  'the panel never writes anywhere except /filing', writes.map(c => `${c.opts.method || 'GET'} ${c.path}`).join(',') || 'no writes')
+check(calls.filter(c => c.path.startsWith('/list')).every(c => !c.opts.method || c.opts.method === 'GET'),
+  'listing is always a plain GET')
 
 const warnText = (fixture.integrity && fixture.integrity.warnings) || []
 if (warnText.length) {

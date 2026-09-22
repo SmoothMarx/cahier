@@ -29,4 +29,5 @@ for scope in active all; do
 done
 
 echo
-echo "OK — panel lists every active cahier, deterministically, read-only."
+echo "OK — panel lists every active cahier, deterministically, groups them by profile ▸ project,"
+echo "     reads them in-window, and writes nothing but the human's ✎ filing."

@@ -5,14 +5,20 @@ Every cahier in one place, reachable from the desktop sidebar.
 A cahier is a question the agent asks a human — a served HTML page (or a chat
 question) whose answers land in an inbox and a SQLite table. `Cahier Hub` is the
 index: one sidebar row → `/cahiers` → every live and pending cahier with its
-saves, deadline, PIN state and served link. Open one, copy its link, or filter
-by scope.
+saves, deadline, PIN state and served link, grouped by **profile ▸ project**.
+Read one **here** (framed in the workspace pane, browser one click away), copy
+its link, filter by scope, or say which profile/project a cahier belongs to.
 
-**Read-only by construction.** The page renders whatever
+**Reads are read-only by construction.** The page renders whatever
 `cahier_ctl.iteration()` returns — the same call the CLI's `list` uses — so the
-page and the terminal can never disagree about what a cahier *is*. Nothing here
-writes: not to `~/cahier-share/`, not to the registry, not to the answers DB.
-Zero API keys, zero model tokens.
+page and the terminal can never disagree about what a cahier *is*. Grouping only
+buckets that order; it never re-sorts or re-counts it. Zero API keys, zero model
+tokens.
+
+**One write exists, and a human makes it.** The ✎ on a row POSTs `/filing` to
+record the profile and project behind a cahier; that goes through
+`cahier_ctl.set_filing` (slug validated against the live list, atomic rename,
+audit line in `cahier-control.log`). Nothing else on the page writes anywhere.
 
 ## What's in here
 
@@ -21,8 +27,8 @@ Zero API keys, zero model tokens.
 | `plugin.yaml` | Plugin manifest (`kind: standalone`) |
 | `__init__.py` | Agent-side stub — registers no tools/hooks by design |
 | `dashboard/manifest.json` | Dashboard half: label, icon, API file, hidden tab |
-| `dashboard/plugin_api.py` | Read-only JSON backend, mounted at `/api/plugins/cahier-hub/` |
-| `desktop/plugin.js` | Sidebar row + `/cahiers` page (runs inside the Electron app) |
+| `dashboard/plugin_api.py` | JSON backend (all reads + the one `POST /filing`), mounted at `/api/plugins/cahier-hub/` |
+| `desktop/plugin.js` | Sidebar row + `/cahiers` page: grouping, in-window viewer, ✎ filing (runs inside the Electron app) |
 | `tests/` | Backend contract suite + panel render harness |
 
 ## Endpoints
@@ -30,8 +36,9 @@ Zero API keys, zero model tokens.
 | Route | Returns |
 |---|---|
 | `GET /health` | Control-plane load status, bridge port, counts |
-| `GET /list?scope=active\|all\|finished` | Rows + counts + integrity warnings (what the page fetches) |
+| `GET /list?scope=active\|all\|finished` | Rows + counts + integrity warnings + the folder vocabulary (what the page fetches) |
 | `GET /cahier?slug=<slug>` | One cahier, plus its latest saves |
+| `POST /filing` | Records `{slug, profile, project}` (empty string = forget). 404 on an unknown slug, 400 on bad input, 503 when the control plane is missing |
 
 Every route sits behind the dashboard's own auth (the same gate
 `mnemosyne-panel` lives behind), so a bare `curl` from the host gets `401`; the
@@ -39,6 +46,27 @@ app's `ctx.rest` carries the session token.
 
 `active` = live + pending. `finished` = retired. Unknown scopes fall back to
 `all` rather than erroring — a stale bookmark should never show a broken page.
+
+## Where a cahier's profile/project comes from
+
+Grouping needs two labels per cahier and refuses to invent them. Each answer
+carries its provenance (`profile_source` / `project_source`), resolved strongest
+first — the same ladder lives in `cahier_ctl.filing()`:
+
+| Source | Meaning |
+|---|---|
+| `override` | a human said so: the panel's ✎ or `cahier_ctl.py filing --slug … --profile … --project …` |
+| `declared` | stamped into the page by `cahier.py build` (`CAHIER_PROFILE` / `CAHIER_PROJECT`) |
+| `session` | the session that built it → `profile_name` in `~/.hermes/state.db` |
+| `derived` | the project's own name appears in the slug (`mmapp-restructure` → MMAPP). Slug only — titles are prose |
+| `none` | nobody knows; the panel shows an empty chip |
+
+Overrides live in one hand-editable file, `~/.hermes/state/cahier-groups.json`
+(`CAHIER_HUB_GROUPS` re-points it, which is how the tests stay hermetic):
+
+```json
+{"version": 1, "updated_by": "panel", "cahiers": {"rolodex-merges": {"profile": "default", "project": "rolodex"}}}
+```
 
 ## Install
 
@@ -78,10 +106,16 @@ Runs both halves against real data, no fixtures-by-hand:
    other is a cahier the user either can't see or can't open. That half skips
    cleanly when `:8766` isn't listening (override the URL with
    `CAHIER_HUB_BRIDGE=`), so a stopped optional service never turns the suite red.
+   The filing tests write to a `tmp_path` override file: the write lands there and
+   nowhere else, an unknown slug / traversal / oversized label is refused with
+   nothing left behind, a GET never touches the file, and an override always beats
+   every automatic answer.
 2. **Panel harness** (Node, SDK stubbed, real backend payload) — `register()`
-   wires one sidebar row and one route, the page renders every cahier the
-   backend sent exactly once, "Open" hands the served URL to the OS, "Copy link"
-   writes the same URL, and two renders are byte-identical.
+   wires one sidebar row and one route, the page renders every cahier the backend
+   sent exactly once, grouping buckets those rows by profile ▸ project (and Flat
+   drops the headers) without losing any, "Open" frames the served URL in-window,
+   "Browser" hands the same URL to the OS, "Copy link" writes it to the clipboard,
+   and the ✎ POSTs `/filing` — the only non-read call the page makes.
 
 Both suites run against `scope=active` (what the page opens with) and
 `scope=all` (empty-scope edge), so an empty or degenerate payload fails loudly.

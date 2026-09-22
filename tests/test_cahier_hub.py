@@ -143,3 +143,100 @@ def test_integrity_notes_surface_in_the_panel_payload(client):
     unindexed = body["integrity"]["unindexed_inbox"]
     if unindexed:
         assert any("never recorded" in n for n in notes), "lost saves must be visible in the panel"
+
+
+# -------------------------------------------------------------------- filing
+
+
+SOURCES = {"override", "declared", "session", "derived", "none"}
+
+
+def test_every_row_carries_a_filed_profile_and_project(client, ctl):
+    """Grouping needs both labels on every row — including the ones nobody has
+    answered for, which say 'none' instead of inventing a bucket."""
+    body = client.get(f"{PREFIX}/list", params={"scope": "all"}).json()
+    assert body["rows"], "expected cahiers on this machine"
+    for row in body["rows"]:
+        assert isinstance(row.get("profile"), str)
+        assert isinstance(row.get("project"), str)
+        assert row.get("profile_source") in SOURCES, row
+        assert row.get("project_source") in SOURCES, row
+    vocab = body["vocab"]
+    assert "default" in vocab["profiles"]
+    assert isinstance(vocab["projects"], list) and vocab["projects"]
+
+
+def test_filing_write_lands_in_one_file_and_survives_a_relist(client, ctl, monkeypatch, tmp_path):
+    """The panel's ✎ is the only write path, it goes to the groups file alone, and
+    the very next GET must show it — no cache standing between the human and the
+    answer."""
+    target = tmp_path / "cahier-groups.json"
+    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(target))
+    body = client.get(f"{PREFIX}/list", params={"scope": "all"}).json()
+    slug = body["rows"][0]["slug"]
+
+    resp = client.post(f"{PREFIX}/filing",
+                       json={"slug": slug, "profile": "dobbs", "project": "Pharmacy"})
+    assert resp.status_code == 200, resp.text
+    assert target.is_file(), "the override must land in the file the resolver reads"
+    on_disk = json.loads(target.read_text())
+    assert on_disk["cahiers"][slug] == {"profile": "dobbs", "project": "Pharmacy"}
+    assert on_disk["updated_by"] == "panel"
+
+    rows = {r["slug"]: r for r in client.get(f"{PREFIX}/list", params={"scope": "all"}).json()["rows"]}
+    assert rows[slug]["profile"] == "dobbs"
+    assert rows[slug]["project"] == "Pharmacy"
+    assert rows[slug]["profile_source"] == "override"
+    assert rows[slug]["project_source"] == "override"
+
+    # An empty string FORGETS the override and hands the question back to the resolver.
+    assert client.post(f"{PREFIX}/filing",
+                       json={"slug": slug, "profile": "", "project": ""}).status_code == 200
+    assert json.loads(target.read_text())["cahiers"] == {}
+    rows = {r["slug"]: r for r in client.get(f"{PREFIX}/list", params={"scope": "all"}).json()["rows"]}
+    assert rows[slug]["profile_source"] != "override"
+
+
+def test_filing_refuses_unknown_slugs_and_bad_input(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(tmp_path / "g.json"))
+    assert client.post(f"{PREFIX}/filing", json={}).status_code == 400
+    assert client.post(f"{PREFIX}/filing", json={"slug": "no-such-cahier"}).status_code == 404
+    assert client.post(f"{PREFIX}/filing",
+                       json={"slug": "../../etc/passwd", "profile": "x"}).status_code == 404
+    body = client.get(f"{PREFIX}/list", params={"scope": "all"}).json()
+    slug = body["rows"][0]["slug"]
+    assert client.post(f"{PREFIX}/filing",
+                       json={"slug": slug, "profile": "x" * 200}).status_code == 400
+    assert not (tmp_path / "g.json").exists(), "a rejected write must leave nothing behind"
+
+
+def test_reading_never_touches_the_groups_file(client, ctl, monkeypatch, tmp_path):
+    """The filing file is written by a human click and by nothing else."""
+    target = tmp_path / "g.json"
+    target.write_text('{"version": 1, "cahiers": {"kept": {"profile": "default"}}}')
+    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(target))
+    before = target.read_text()
+    for scope in ("active", "all", "finished"):
+        client.get(f"{PREFIX}/list", params={"scope": scope})
+    client.get(f"{PREFIX}/health")
+    assert target.read_text() == before
+
+
+def test_override_beats_every_automatic_answer(client, ctl, monkeypatch, tmp_path):
+    """A derived or session answer is a default, never a verdict: the override wins."""
+    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(tmp_path / "g.json"))
+    slug = "mmapp-restructure"
+    auto = ctl.filing(slug, meta={"declared_profile": "", "declared_project": ""})
+    assert auto["project_source"] == "derived"
+    assert ctl.set_filing(slug, project="Client Work", actor="test")["ok"]
+    now = ctl.filing(slug, meta={})
+    assert (now["project"], now["project_source"]) == ("Client Work", "override")
+
+
+def test_declared_profile_wins_over_the_build_session(ctl):
+    """A page that stamps its own profile is believed over the session lookup."""
+    both = ctl.filing("declared-slug", meta={"declared_profile": "cody",
+                                             "origin_session": "20260820_114128_a3c89b74"})
+    assert (both["profile"], both["profile_source"]) == ("cody", "declared")
+    session = ctl.filing("session-slug", meta={"origin_session": "20260820_114128_a3c89b74"})
+    assert (session["profile"], session["profile_source"]) == ("default", "session")
