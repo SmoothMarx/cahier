@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cahier Hub — one-command verification.
+# Cahier — one-command verification.
 #
 #   ./tests/run.sh
 #
@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN="$(dirname "$HERE")"
 # Prefer an explicit interpreter, then any candidate that can actually import the
 # test deps, then PATH. A venv that exists but lacks pytest must not be picked.
-VENV_PY="${CAHIER_HUB_PY:-}"
+VENV_PY="${CAHIER_PY:-}"
 if [ -z "$VENV_PY" ]; then
   for cand in "${HERMES_HOME:-$HOME/.hermes}/hermes-agent/venv/bin/python3" \
               "${HERMES_HOME:-$HOME/.hermes}/venv/bin/python3" \
@@ -21,7 +21,7 @@ if [ -z "$VENV_PY" ]; then
     [ -n "$cand" ] && [ -x "$cand" ] || continue
     if "$cand" -c 'import pytest, fastapi, httpx' >/dev/null 2>&1; then VENV_PY="$cand"; break; fi
   done
-  [ -n "$VENV_PY" ] || { echo "no interpreter with pytest+fastapi+httpx found; set CAHIER_HUB_PY" >&2; exit 2; }
+  [ -n "$VENV_PY" ] || { echo "no interpreter with pytest+fastapi+httpx found; set CAHIER_PY" >&2; exit 2; }
 fi
 # Scratch: the tests and the panel harness create throwaway dirs under it, and a
 # failing run must not leave litter behind either. Nothing here is hardcoded to
@@ -30,14 +30,14 @@ SCRATCH="${TMPDIR:-${HERMES_HOME:-$HOME/.hermes}/cache/scratch}"
 mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="$(mktemp -d)"
 # The panel harness builds its stub node_modules somewhere disposable; tell it
 # where, so a fresh clone never writes under $HOME/.hermes on its own.
-export CAHIER_HUB_JS_WORK="${CAHIER_HUB_JS_WORK:-$SCRATCH/cahier-hub-js}"
+export CAHIER_JS_WORK="${CAHIER_JS_WORK:-$SCRATCH/cahier-js}"
 
 FIXTURE_DIR="$SCRATCH"
 mkdir -p "$FIXTURE_DIR" 2>/dev/null || FIXTURE_DIR="$(mktemp -d)"
-FIXTURE="$FIXTURE_DIR/cahier-hub-fixture.json"
+FIXTURE="$FIXTURE_DIR/cahier-fixture.json"
 cleanup() {
   rc=$?
-  rm -rf "$CAHIER_HUB_JS_WORK" 2>/dev/null || true
+  rm -rf "$CAHIER_JS_WORK" 2>/dev/null || true
   rm -f "$FIXTURE" 2>/dev/null || true
   find "$SCRATCH" -maxdepth 1 -name 'cahier-inbox-*' -o -maxdepth 1 -name 'cahier-state-*' \
     -o -maxdepth 1 -name 'cahier-shape-*' 2>/dev/null | xargs -r rm -rf

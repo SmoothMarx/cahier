@@ -1,5 +1,5 @@
 {
-  "name": "cahier-hub",
+  "name": "cahier",
   "label": "Cahiers",
   "description": "Cahier index grouped by profile \u25b8 project: state, saves, deadline, PIN flags, served link. Open in-window or in the browser, and record which profile/project a cahier belongs to. Iterates through cahier_ctl.py (the same path the CLI uses).",
   "version": "0.5.0",

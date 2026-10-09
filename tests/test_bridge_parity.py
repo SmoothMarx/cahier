@@ -30,9 +30,9 @@ from fastapi.testclient import TestClient
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from test_cahier_hub import PREFIX, _load, api, client, ctl  # noqa: E402,F401
+from test_cahier import PREFIX, _load, api, client, ctl  # noqa: E402,F401
 
-BRIDGE = os.environ.get("CAHIER_HUB_BRIDGE", "http://127.0.0.1:8766/fleet/cahiers")
+BRIDGE = os.environ.get("CAHIER_BRIDGE", "http://127.0.0.1:8766/fleet/cahiers")
 
 
 def _dupes(seq):

@@ -1,19 +1,19 @@
 /**
- * Cahier Hub — the sidebar door to every cahier.
+ * Cahier — the sidebar door to every cahier.
  *
- * Sidebar half of the `cahier-hub` plugin. Its Python half lives beside it at
+ * Sidebar half of the `cahier` plugin. Its Python half lives beside it at
  * `dashboard/plugin_api.py` and hermes-serve mounts it at
- * /api/plugins/cahier-hub/* — exactly the prefix `ctx.rest` is scoped to, so
+ * /api/plugins/cahier/* — exactly the prefix `ctx.rest` is scoped to, so
  * every path below is RELATIVE to that ('/list', not the full URL).
  *
- *   ~/.hermes/plugins/cahier-hub/
+ *   ~/.hermes/plugins/cahier/
  *   ├── dashboard/{manifest.json,plugin_api.py}   ← backend routes
  *   └── desktop/plugin.js                         ← this file
  *
  * The desktop half is LOCAL to the machine running the Electron app: when the
  * app points at a remote backend, drop this file into
- *   Windows : %USERPROFILE%\.hermes\desktop-plugins\cahier-hub\plugin.js
- *   Linux   : ~/.hermes/desktop-plugins/cahier-hub/plugin.js
+ *   Windows : %USERPROFILE%\.hermes\desktop-plugins\cahier\plugin.js
+ *   Linux   : ~/.hermes/desktop-plugins/cahier/plugin.js
  * then Rescan (a folder holding plugin.js with no package marker is treated as
  * hand-installed and never overwritten). Hot-loads in seconds — no rebuild.
  *
@@ -300,7 +300,7 @@ function FilingEditor({ row, vocab, onSaved, onCancel }) {
             variant: 'ghost',
             size: 'xs',
             disabled: busy,
-            title: 'Drop the override and let Cahier Hub resolve it again',
+            title: 'Drop the override and let Cahier resolve it again',
             onClick: () => save(true),
             children: 'Clear'
           }),
@@ -731,7 +731,7 @@ function Panel() {
   }
 
   const query = useQuery({
-    queryKey: ['cahier-hub', scope],
+    queryKey: ['cahier', scope],
     queryFn: () => rest(`/list?scope=${encodeURIComponent(scope)}`),
     staleTime: 5000,
     refetchInterval: 30000,
@@ -878,7 +878,7 @@ function Panel() {
     })
   } else if (query.error) {
     body = jsx(ErrorState, {
-      title: 'Cahier Hub could not read the cahier list',
+      title: 'Cahier could not read the cahier list',
       description: String((query.error && query.error.message) || query.error),
       children: jsx(Button, { variant: 'secondary', onClick: () => query.refetch(), children: 'Retry' })
     })
@@ -931,7 +931,7 @@ function Panel() {
 /* -------------------------------------------------------------------- plugin */
 
 export default {
-  id: 'cahier-hub',
+  id: 'cahier',
   register(ctx) {
     rest = ctx.rest
     osApi = ctx.os

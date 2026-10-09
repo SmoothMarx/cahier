@@ -1,9 +1,9 @@
-"""Cahier Hub contract tests.
+"""Cahier contract tests.
 
 Run with the repo venv (fastapi + httpx live there):
 
     $HOME/.hermes/hermes-agent/venv/bin/python3 -m pytest \
-        ~/.hermes/plugins/cahier-hub/tests/test_cahier_hub.py -q
+        ~/.hermes/plugins/cahier/tests/test_cahier.py -q
 
 These assert CONTRACTS, not snapshots: the panel's payload must agree with the
 control plane, must be deterministic, and must not write anything. A new cahier
@@ -27,7 +27,7 @@ HERE = Path(__file__).resolve().parent
 DASHBOARD = HERE.parent / "dashboard"
 API_FILE = DASHBOARD / "plugin_api.py"
 CTL_FILE = Path.home() / ".hermes" / "scripts" / "cahier_ctl.py"
-PREFIX = "/api/plugins/cahier-hub"
+PREFIX = "/api/plugins/cahier"
 
 
 def _load(name: str, path: Path):
@@ -40,7 +40,7 @@ def _load(name: str, path: Path):
 
 @pytest.fixture(scope="module")
 def api():
-    return _load("cahier_hub_api", API_FILE)
+    return _load("cahier_api", API_FILE)
 
 
 @pytest.fixture(scope="module")
@@ -175,7 +175,7 @@ def test_filing_write_lands_in_one_file_and_survives_a_relist(client, ctl, monke
     the very next GET must show it — no cache standing between the human and the
     answer."""
     target = tmp_path / "cahier-groups.json"
-    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(target))
+    monkeypatch.setenv("CAHIER_GROUPS", str(target))
     body = client.get(f"{PREFIX}/list", params={"scope": "all"}).json()
     slug = body["rows"][0]["slug"]
 
@@ -202,7 +202,7 @@ def test_filing_write_lands_in_one_file_and_survives_a_relist(client, ctl, monke
 
 
 def test_filing_refuses_unknown_slugs_and_bad_input(client, monkeypatch, tmp_path):
-    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(tmp_path / "g.json"))
+    monkeypatch.setenv("CAHIER_GROUPS", str(tmp_path / "g.json"))
     assert client.post(f"{PREFIX}/filing", json={}).status_code == 400
     assert client.post(f"{PREFIX}/filing", json={"slug": "no-such-cahier"}).status_code == 404
     assert client.post(f"{PREFIX}/filing",
@@ -218,7 +218,7 @@ def test_reading_never_touches_the_groups_file(client, ctl, monkeypatch, tmp_pat
     """The filing file is written by a human click and by nothing else."""
     target = tmp_path / "g.json"
     target.write_text('{"version": 1, "cahiers": {"kept": {"profile": "default"}}}')
-    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(target))
+    monkeypatch.setenv("CAHIER_GROUPS", str(target))
     before = target.read_text()
     for scope in ("active", "paused", "all", "finished"):
         client.get(f"{PREFIX}/list", params={"scope": scope})
@@ -240,7 +240,7 @@ def test_override_beats_every_automatic_answer(ctl, monkeypatch, tmp_path):
         json.dumps({"projects": [{"name": "Ops"}, {"name": "Atlas"}]}))
     monkeypatch.setattr(ctl, "PROJECTS", str(projects))
     monkeypatch.setattr(ctl, "SERVE", str(share))
-    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(tmp_path / "g.json"))
+    monkeypatch.setenv("CAHIER_GROUPS", str(tmp_path / "g.json"))
     ctl._VOCAB_CACHE.clear()
 
     slug = "ops-restructure"
@@ -291,7 +291,7 @@ def scratch_world(ctl, monkeypatch, tmp_path):
     monkeypatch.setattr(ctl, "DEADLINE", str(state / "cahier-deadline.json"))
     monkeypatch.setattr(ctl, "ANSWERS_DB", str(state / "cahier-answers.db"))
     monkeypatch.setattr(ctl, "CONTROL_LOG", str(state / "cahier-control.log"))
-    monkeypatch.setenv("CAHIER_HUB_GROUPS", str(state / "cahier-groups.json"))
+    monkeypatch.setenv("CAHIER_GROUPS", str(state / "cahier-groups.json"))
     # never touch the real systemd timer from a test
     monkeypatch.setenv("CAHIER_CTL_NO_ARM", "1")
     ctl._VOCAB_CACHE.clear()

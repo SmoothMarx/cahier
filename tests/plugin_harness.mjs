@@ -39,8 +39,8 @@ const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'))
 
 /* ------------------------------------------------------------ stub packages */
 
-const WORK = process.env.CAHIER_HUB_JS_WORK
-  || path.join(os.tmpdir(), 'cahier-hub-js')   /* run.sh points this at its scratch dir */
+const WORK = process.env.CAHIER_JS_WORK
+  || path.join(os.tmpdir(), 'cahier-js')   /* run.sh points this at its scratch dir */
 fs.rmSync(WORK, { recursive: true, force: true })
 const NM = path.join(WORK, 'node_modules')
 fs.mkdirSync(path.join(NM, '@hermes', 'plugin-sdk'), { recursive: true })

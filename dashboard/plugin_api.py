@@ -1,4 +1,4 @@
-"""Cahier Hub — backend for the desktop sidebar page.
+"""Cahier — backend for the desktop sidebar page.
 
 Every number the panel shows comes from ``cahier_ctl.iteration()``: the same
 read-only call the CLI's ``list`` subcommand uses, so the page and the terminal
@@ -19,11 +19,11 @@ and says so in ``integrity.warnings`` instead of pretending the list is complete
 Configuration is layered, most specific first, so the same build works on a
 stranger's machine and on the one it was written on:
 
-1. ``CAHIER_HUB_<KEY>`` environment variables (ops; ``CAHIER_HUB_GROUPS``,
-   ``CAHIER_HUB_BASE_URL``, ``CAHIER_HUB_CTL`` keep their historical names),
-2. ``plugins.entries.cahier-hub.settings.<key>`` in ``$HERMES_HOME/config.yaml``
+1. ``CAHIER_<KEY>`` environment variables (ops; ``CAHIER_GROUPS``,
+   ``CAHIER_BASE_URL``, ``CAHIER_CTL`` keep their historical names),
+2. ``plugins.entries.cahier.settings.<key>`` in ``$HERMES_HOME/config.yaml``
    — the Desktop Plugins settings form, driven by ``config_schema``,
-3. ``$HERMES_HOME/cahier-hub.json`` — the answers the agent recorded while
+3. ``$HERMES_HOME/cahier.json`` — the answers the agent recorded while
    onboarding in a session chat,
 4. the built-in defaults below.
 
@@ -70,12 +70,17 @@ DEFAULTS: dict[str, Any] = {
     "users": [],             # [{"name": "...", "pin": "..."}] — names only; PINs travel in the page
 }
 
-# Historical env names, kept so existing setups (and the docs) keep working.
+# Names each setting accepts, most-preferred first. The plugin was called
+# `cahier-hub` until 2026-10-09; the old prefix stays honoured so a deployment
+# mid-rename keeps working. `groups_file`/`control_plane` need an explicit entry
+# because their derived form (`CAHIER_GROUPS_FILE`) is not the documented name.
+# The derived `CAHIER_<KEY>` names are appended by the resolver, so listing them
+# here is for the old generation only. Do not drop these without a deprecation cycle.
 _ENV_ALIASES = {
     "bridge_port": ("CAHIER_HUB_BRIDGE_PORT",),
     "cache_ttl": ("CAHIER_HUB_CACHE_TTL",),
-    "groups_file": ("CAHIER_HUB_GROUPS",),
-    "control_plane": ("CAHIER_HUB_CTL",),
+    "groups_file": ("CAHIER_GROUPS", "CAHIER_HUB_GROUPS"),
+    "control_plane": ("CAHIER_CTL", "CAHIER_HUB_CTL"),
 }
 
 router = APIRouter()
@@ -100,7 +105,7 @@ def _home() -> Path:
 
 
 def _config_settings() -> dict:
-    """`plugins.entries.cahier-hub.settings` from $HERMES_HOME/config.yaml.
+    """`plugins.entries.cahier.settings` from $HERMES_HOME/config.yaml.
 
     Read with a tiny hand-rolled scan rather than a YAML dependency: the panel
     must not gain an import that the desktop host may not ship. Only the
@@ -131,7 +136,7 @@ def _config_settings() -> dict:
         if not in_entries:
             continue
         if indent == 4:
-            in_ours = line.startswith("cahier-hub:")
+            in_ours = line.startswith("cahier:")
             in_settings = False
             continue
         if not in_ours:
@@ -165,9 +170,9 @@ def _scalar(text: str) -> Any:
 
 
 def _chat_settings() -> dict:
-    """`$HERMES_HOME/cahier-hub.json` — what the onboarding questions wrote."""
+    """`$HERMES_HOME/cahier.json` — what the onboarding questions wrote."""
     try:
-        data = json.loads((_home() / "cahier-hub.json").read_text(encoding="utf-8"))
+        data = json.loads((_home() / "cahier.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -189,9 +194,9 @@ def _settings_key() -> tuple:
     env = tuple(
         (name, os.environ.get(name, ""))
         for key in sorted(DEFAULTS)
-        for name in _ENV_ALIASES.get(key, ()) + (f"CAHIER_HUB_{key.upper()}",)
+        for name in _ENV_ALIASES.get(key, ()) + (f"CAHIER_{key.upper()}",)
     )
-    return (str(_home()), mt(_home() / "config.yaml"), mt(_home() / "cahier-hub.json"), env)
+    return (str(_home()), mt(_home() / "config.yaml"), mt(_home() / "cahier.json"), env)
 
 
 def settings() -> dict:
@@ -211,7 +216,7 @@ def settings() -> dict:
             merged[k] = value
             layers[k] = "config.yaml"     # the Desktop Plugins settings form
     for k in DEFAULTS:
-        names = _ENV_ALIASES.get(k, ()) + (f"CAHIER_HUB_{k.upper()}",)
+        names = _ENV_ALIASES.get(k, ()) + (f"CAHIER_{k.upper()}",)
         for name in names:
             raw = os.environ.get(name)
             if raw not in (None, ""):
@@ -327,7 +332,7 @@ def ctl() -> Any:
         module = importlib.util.module_from_spec(spec)
         sys.modules.setdefault("cahier_ctl", module)
         spec.loader.exec_module(module)
-        module._cahier_hub_overrides = _apply_home(module)
+        module._cahier_overrides = _apply_home(module)
         _ctl = module
     except Exception as exc:  # a broken control plane degrades, never 500s
         _ctl_error = f"{type(exc).__name__}: {exc}"

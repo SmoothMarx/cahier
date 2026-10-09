@@ -1,9 +1,9 @@
-# Cahier Hub
+# Cahier
 
 Every cahier in one place, reachable from the desktop sidebar.
 
 A cahier is a question the agent asks a human — a served HTML page (or a chat
-question) whose answers land in an inbox and a SQLite table. `Cahier Hub` is the
+question) whose answers land in an inbox and a SQLite table. `Cahier` is the
 index: one sidebar row → `/cahiers` → every live and pending cahier with its
 saves, deadline, PIN state and served link, grouped by **profile ▸ project**.
 Read one **here** (framed in the workspace pane, browser one click away), copy
@@ -40,7 +40,7 @@ so a badge never has to mean two things.
 | `plugin.yaml` | Plugin manifest: `config_schema` (the Desktop settings form), version, tags |
 | `__init__.py` | Agent-side stub — registers no tools/hooks by design |
 | `dashboard/manifest.json` | Dashboard half: label, icon, API file, hidden tab |
-| `dashboard/plugin_api.py` | JSON backend (reads + the two human writes), mounted at `/api/plugins/cahier-hub/` |
+| `dashboard/plugin_api.py` | JSON backend (reads + the two human writes), mounted at `/api/plugins/cahier/` |
 | `desktop/plugin.js` | Sidebar row + `/cahiers` page: grouping, in-window viewer, ✎ filing (runs inside the Electron app) |
 | `lib/cahier_ctl.py` | Bundled control plane, so a fresh install has one before it has its own |
 | `scripts/doctor.py` | Prints the install checklist (`GET /doctor` from a terminal) |
@@ -79,10 +79,18 @@ layer every value came from.
 
 | Layer | How | Use it for |
 |---|---|---|
-| `CAHIER_HUB_<KEY>` environment variables | `CAHIER_HUB_BRIDGE_PORT=9000` | ops, containers, systemd |
-| `plugins.entries.cahier-hub.settings` in `$HERMES_HOME/config.yaml` | the **Desktop → Capabilities → Plugins** settings form, driven by `config_schema` | anyone using the app |
-| `$HERMES_HOME/cahier-hub.json` | written by the agent when it asks the onboarding questions in a session chat | the first run, conversationally |
+| `CAHIER_<KEY>` environment variables | `CAHIER_BRIDGE_PORT=9000` | ops, containers, systemd |
+| `plugins.entries.cahier.settings` in `$HERMES_HOME/config.yaml` | the **Desktop → Capabilities → Plugins** settings form, driven by `config_schema` | anyone using the app |
+| `$HERMES_HOME/cahier.json` | written by the agent when it asks the onboarding questions in a session chat | the first run, conversationally |
 | built-in defaults | this repo | everything else |
+
+The plugin was called `cahier-hub` before v0.5.0. The older
+`CAHIER_HUB_<KEY>` names (`CAHIER_HUB_GROUPS`, `CAHIER_HUB_CTL`,
+`CAHIER_HUB_BRIDGE_PORT`, …) are still honoured, so an existing deployment does
+not have to rename its environment in the same step as the upgrade — and the
+groups-file resolver reads the current name first, the old one second, so the
+panel and the control plane can never end up writing and reading different
+files mid-rename.
 
 The keys (also in `plugin.yaml`): `bridge_port`, `base_url`, `cache_ttl`,
 `control_plane`, `groups_file`, `share_dir`, `projects_root`, `hosting_mode`,
@@ -128,7 +136,7 @@ first — the same ladder lives in `cahier_ctl.filing()`:
 | `none` | nobody knows; the panel shows an empty chip |
 
 Overrides live in one hand-editable file,
-`$HERMES_HOME/state/cahier-groups.json` (`CAHIER_HUB_GROUPS` re-points it, which
+`$HERMES_HOME/state/cahier-groups.json` (`CAHIER_GROUPS` re-points it, which
 is how the tests stay hermetic):
 
 ```json
@@ -157,9 +165,9 @@ it, because it hardcodes `~/.hermes` otherwise.
 Backend half:
 
 ```bash
-hermes plugins install cahier-hub          # or: clone into $HERMES_HOME/plugins/
-hermes plugins enable cahier-hub           # adds it to plugins.enabled
-hermes plugins doctor cahier-hub           # runtime discovery + import contract
+hermes plugins install cahier          # or: clone into $HERMES_HOME/plugins/
+hermes plugins enable cahier           # adds it to plugins.enabled
+hermes plugins doctor cahier           # runtime discovery + import contract
 # restart hermes-serve so the route mounts
 ```
 
@@ -167,7 +175,7 @@ Desktop half — the app runs its own `plugin.js` from its own home, so the file
 has to land there:
 
 ```
-$HERMES_HOME/desktop-plugins/cahier-hub/plugin.js
+$HERMES_HOME/desktop-plugins/cahier/plugin.js
 ```
 
 then **Rescan** in the app's plugin settings. (On a local app this is what
@@ -177,7 +185,7 @@ drop.)
 Check it:
 
 ```bash
-python3 scripts/doctor.py            # or: GET /api/plugins/cahier-hub/doctor
+python3 scripts/doctor.py            # or: GET /api/plugins/cahier/doctor
 ```
 
 ## Verify
@@ -197,7 +205,7 @@ payload):
    equal `GET /fleet/cahiers` on the bridge exactly — a slug visible in one and
    not the other is a cahier the user either can't see or can't open. That half
    skips cleanly when `:8766` isn't listening (override with
-   `CAHIER_HUB_BRIDGE=`), so a stopped optional service never turns the suite
+   `CAHIER_BRIDGE=`), so a stopped optional service never turns the suite
    red. The filing tests write to a `tmp_path` override file: the write lands
    there and nowhere else, an unknown slug / traversal / oversized label is
    refused with nothing left behind, a GET never touches the file, and an
@@ -223,7 +231,7 @@ The harness runs against `scope=active` (what the page opens with) and
 What a user should know before installing (admission-policy terms):
 
 - **Network.** No outbound calls. The dashboard half answers on hermes-serve's
-  own origin (`/api/plugins/cahier-hub/*`) and reads local files. A bridge, if
+  own origin (`/api/plugins/cahier/*`) and reads local files. A bridge, if
   you run one, listens on your LAN so answerers can open a cahier — that is the
   only listener. No telemetry, no analytics, no update pings, no third party.
 - **Reads outside its own data.** The cahier files and the profile/project

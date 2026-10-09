@@ -1,4 +1,4 @@
-"""Cahier Hub — configuration, control-plane discovery and doctor contracts.
+"""Cahier — configuration, control-plane discovery and doctor contracts.
 
 The plugin is meant to run on someone else's machine, where the author's paths do
 not exist. These tests therefore build a throwaway ``HERMES_HOME`` and assert the
@@ -6,7 +6,7 @@ plugin still finds a control plane, still reads settings, and still says out lou
 when a deployment is broken.
 
     $HOME/.hermes/hermes-agent/venv/bin/python3 -m pytest \
-        ~/.hermes/plugins/cahier-hub/tests/test_config_and_doctor.py -q
+        ~/.hermes/plugins/cahier/tests/test_config_and_doctor.py -q
 """
 
 from __future__ import annotations
@@ -23,11 +23,21 @@ from fastapi.testclient import TestClient
 HERE = Path(__file__).resolve().parent
 PLUGIN = HERE.parent
 API_FILE = PLUGIN / "dashboard" / "plugin_api.py"
-PREFIX = "/api/plugins/cahier-hub"
+PREFIX = "/api/plugins/cahier"
 
 # Every env var the settings layer reads: cleared per test so a developer's own
 # shell cannot change the result.
 ENV_VARS = (
+    "CAHIER_BRIDGE_PORT",
+    "CAHIER_CACHE_TTL",
+    "CAHIER_BASE_URL",
+    "CAHIER_GROUPS",
+    "CAHIER_CTL",
+    "CAHIER_HOSTING_MODE",
+    "CAHIER_NOTIFY_CHANNEL",
+    "CAHIER_USERS",
+    # the pre-2026-10-09 prefix, still honoured as an alias — a leftover from an
+    # earlier test must not leak into the next one
     "CAHIER_HUB_BRIDGE_PORT",
     "CAHIER_HUB_CACHE_TTL",
     "CAHIER_HUB_BASE_URL",
@@ -41,7 +51,7 @@ ENV_VARS = (
 
 def load_api():
     """A fresh copy of the backend module — its caches are module-level."""
-    name = "cahier_hub_api_cfg"
+    name = "cahier_api_cfg"
     spec = importlib.util.spec_from_file_location(name, API_FILE)
     module = importlib.util.module_from_spec(spec)
     sys.modules.pop(name, None)
@@ -70,7 +80,7 @@ def write_config(home: Path, body: str) -> None:
 
 
 def write_chat(home: Path, data: dict) -> None:
-    (home / "cahier-hub.json").write_text(json.dumps(data), encoding="utf-8")
+    (home / "cahier.json").write_text(json.dumps(data), encoding="utf-8")
 
 
 # ----------------------------------------------------------------- precedence
@@ -88,7 +98,7 @@ def test_config_yaml_beats_the_chat_answers(api, world):
     write_config(world, """
 plugins:
   entries:
-    cahier-hub:
+    cahier:
       settings:
         bridge_port: 9002
 """)
@@ -102,13 +112,13 @@ def test_env_beats_everything(api, world, monkeypatch):
     write_config(world, """
 plugins:
   entries:
-    cahier-hub:
+    cahier:
       settings:
         bridge_port: 9002
 """)
-    monkeypatch.setenv("CAHIER_HUB_BRIDGE_PORT", "9003")
+    monkeypatch.setenv("CAHIER_BRIDGE_PORT", "9003")
     assert api.settings()["bridge_port"] == 9003
-    assert api._settings_layers["bridge_port"] == "env:CAHIER_HUB_BRIDGE_PORT"
+    assert api._settings_layers["bridge_port"] == "env:CAHIER_BRIDGE_PORT"
 
 
 def test_only_our_settings_block_is_read(api, world):
@@ -119,7 +129,7 @@ plugins:
     some-other-plugin:
       settings:
         bridge_port: 1234
-    cahier-hub:
+    cahier:
       settings:
         bridge_port: 4321
 """)
@@ -130,7 +140,7 @@ def test_scalars_survive_the_yaml_scan(api, world):
     write_config(world, """
 plugins:
   entries:
-    cahier-hub:
+    cahier:
       settings:
         pin_enabled: true
         cache_ttl: 2.5
@@ -145,12 +155,12 @@ plugins:
 
 
 def test_env_only_list_setting_is_parsed(api, world, monkeypatch):
-    monkeypatch.setenv("CAHIER_HUB_USERS", '[{"name": "Sam"}]')
+    monkeypatch.setenv("CAHIER_USERS", '[{"name": "Sam"}]')
     assert api.settings()["users"] == [{"name": "Sam"}]
 
 
 def test_legacy_env_names_still_work(api, world, monkeypatch):
-    monkeypatch.setenv("CAHIER_HUB_GROUPS", "/tmp/filings.json")
+    monkeypatch.setenv("CAHIER_GROUPS", "/tmp/filings.json")
     assert str(api._groups_path()) == "/tmp/filings.json"
 
 

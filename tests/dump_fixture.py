@@ -15,16 +15,16 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 API_FILE = HERE.parent / "dashboard" / "plugin_api.py"
-PREFIX = "/api/plugins/cahier-hub"
+PREFIX = "/api/plugins/cahier"
 
 
 def main() -> int:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    spec = importlib.util.spec_from_file_location("cahier_hub_api", API_FILE)
+    spec = importlib.util.spec_from_file_location("cahier_api", API_FILE)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["cahier_hub_api"] = module
+    sys.modules["cahier_api"] = module
     spec.loader.exec_module(module)
 
     app = FastAPI()

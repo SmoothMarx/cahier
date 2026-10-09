@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cahier Hub — doctor.
+"""Cahier — doctor.
 
 Prints the same checklist ``GET /doctor`` returns, so an install can be checked
 without the desktop app. Nothing here writes.
@@ -29,15 +29,15 @@ def load_api():
     """Import the plugin's backend module by path (it is not an installed package)."""
     if not API_FILE.is_file():
         sys.exit(f"dashboard/plugin_api.py is missing from {PLUGIN}")
-    spec = importlib.util.spec_from_file_location("cahier_hub_api", API_FILE)
+    spec = importlib.util.spec_from_file_location("cahier_api", API_FILE)
     module = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("cahier_hub_api", module)
+    sys.modules.setdefault("cahier_api", module)
     spec.loader.exec_module(module)
     return module
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Is this Cahier Hub install wired up?")
+    parser = argparse.ArgumentParser(description="Is this Cahier install wired up?")
     parser.add_argument("--base", default=None,
                         help="the URL answerers open, to check it (default: from settings)")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
@@ -54,7 +54,7 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 1 if report["fails"] else 0
 
-    print(f"cahier-hub {report['version']} — doctor  ({report['generated_at']})")
+    print(f"cahier {report['version']} — doctor  ({report['generated_at']})")
     print()
     for check in report["checks"]:
         print(f"  [{GLYPH.get(check['status'], check['status'])}] {check['name']}: {check['detail']}")

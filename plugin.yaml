@@ -1,11 +1,11 @@
-name: cahier-hub
+name: cahier
 version: "0.5.0"
 manifest_version: 2
 api_version: 1
 description: "Every cahier in one sidebar page — grouped by profile ▸ project, read in-window, live + pending first, with saves, deadlines, PIN flags and the served link. Iterates through the cahier control plane so the panel and the CLI can never disagree. Zero API keys, zero model tokens."
 author: SmoothMarx
 license: MIT
-homepage: https://hermes-agent.nousresearch.com/docs/plugins/cahier-hub
+homepage: https://hermes-agent.nousresearch.com/docs/plugins/cahier
 kind: standalone
 # Floor = the release this plugin was built and validated against. Raise it only
 # with evidence: the loader skips the plugin when the constraint is unmet, and a
@@ -21,10 +21,10 @@ capabilities:
   provides_hooks: []
   provides_middleware: []
   requires_env: []
-# Settings live at plugins.entries.cahier-hub.settings.<key> in config.yaml and
+# Settings live at plugins.entries.cahier.settings.<key> in config.yaml and
 # drive the Desktop Plugins settings form. The same keys are read from
-# $HERMES_HOME/cahier-hub.json (written by the in-session onboarding questions)
-# and from CAHIER_HUB_<KEY> environment variables; environment wins, then
+# $HERMES_HOME/cahier.json (written by the in-session onboarding questions)
+# and from CAHIER_<KEY> environment variables; environment wins, then
 # config.yaml, then the onboarding answers, then these defaults. GET /doctor
 # prints which layer supplied each value.
 config_schema:

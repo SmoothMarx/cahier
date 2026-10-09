@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cahier control plane — list / spin up (publish) / spin down (unpublish).
 
-Bundled copy, shipped with the Cahier Hub plugin so a fresh install has a
+Bundled copy, shipped with the Cahier plugin so a fresh install has a
 control plane before the user has one of their own. If a copy also exists at
 $HERMES_HOME/scripts/cahier_ctl.py, THAT one is used (and is the one the CLI
 and any cron job are running) — keep the real one there and treat this file as
@@ -675,8 +675,14 @@ _SESSION_PROFILE: dict = {}
 
 
 def groups_path():
-    """The one file both halves agree on; env-overridable so tests stay hermetic."""
-    return os.environ.get("CAHIER_HUB_GROUPS") or GROUPS
+    """The one file both halves agree on; env-overridable so tests stay hermetic.
+
+    The current name is checked first, the pre-2026-10-09 ``CAHIER_HUB_GROUPS``
+    second — a deployment mid-rename must never read a different groups file than
+    the panel writes.
+    """
+    return (os.environ.get("CAHIER_GROUPS") or os.environ.get("CAHIER_HUB_GROUPS")
+            or GROUPS)
 
 
 def load_groups(path=None):
