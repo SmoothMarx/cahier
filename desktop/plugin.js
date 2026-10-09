@@ -17,12 +17,20 @@
  * then Rescan (a folder holding plugin.js with no package marker is treated as
  * hand-installed and never overwritten). Hot-loads in seconds — no rebuild.
  *
- * Two writes exist, and both are the human's: `Open` reads a cahier HERE, in an
- * iframe filling the workspace pane (the browser stays one click away), and the
- * ✎ on a row records which profile/project that cahier belongs to. Everything
- * else is a GET. The list order is the backend's — it is sorted deterministically
- * in cahier_ctl.iteration() and is NOT re-sorted here, so the panel and
- * `cahier_ctl.py list` read identically; grouping only buckets that order.
+ * Three writes exist, and every one of them is the human's click: `Open` reads a
+ * cahier HERE, in an iframe filling the workspace pane (the browser stays one
+ * click away); the ✎ on a row records which profile/project that cahier belongs
+ * to; and the buttons under a row's status move it. Spin up serves the page again
+ * from its project folder, in its ORIGINAL settings (2026-10-03): the same file,
+ * the same gate, the same deadline while that deadline has not passed. Pause and
+ * Close are the same file move — off the bridge — with a different registry note:
+ * pause stays Active and startable, close is done. Which of the three a row offers
+ * is the backend's call (row.actions); the badge above them says which state the
+ * row is in (serving / paused / closed), and the phase reads on the left.
+ * Everything else is a GET. The list order is the backend's — it is sorted
+ * deterministically in cahier_ctl.iteration() and is NOT re-sorted here, so the
+ * panel and `cahier_ctl.py list` read identically; grouping only buckets that
+ * order.
  */
 
 import {
@@ -38,7 +46,9 @@ import {
   Separator,
   Skeleton,
   cn,
-  useQuery
+  icons,
+  useQuery,
+  useTheme
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useMemo, useState } from 'react'
@@ -69,10 +79,35 @@ const STATE_VARIANT = {
   unknown: 'muted'
 }
 
+/** STATE is the phase ("how is it doing"); LIFECYCLE is what the buttons act on
+ *  ("on the bridge / parked on purpose / done"). A page that was never published
+ *  has no lifecycle, so it keeps showing its phase. */
+const LIFECYCLE_LABEL = {
+  serving: 'serving',
+  paused: 'paused',
+  closed: 'closed'
+}
+
+const LIFECYCLE_VARIANT = {
+  serving: 'default',
+  paused: 'muted',
+  closed: 'muted'
+}
+
+/** The badge a row shows: its lifecycle when it has one, else its phase. */
+function statusLabel(row) {
+  return (row.lifecycle ? LIFECYCLE_LABEL[row.lifecycle] : STATE_LABEL[row.state]) || row.state
+}
+
+function statusVariant(row) {
+  return (row.lifecycle ? LIFECYCLE_VARIANT[row.lifecycle] : STATE_VARIANT[row.state]) || 'muted'
+}
+
 const SCOPES = [
   { id: 'active', label: 'Active' },
-  { id: 'all', label: 'All' },
-  { id: 'finished', label: 'Finished' }
+  { id: 'paused', label: 'Paused' },
+  { id: 'finished', label: 'Finished' },
+  { id: 'all', label: 'All' }
 ]
 
 /** How the rows are bucketed. Profile ▸ project is the default: it answers
@@ -276,9 +311,105 @@ function FilingEditor({ row, vocab, onSaved, onCancel }) {
   })
 }
 
+/* Every move a row allows, right where its status is. The backend decides which
+ * ones those are (row.actions): a served cahier can be paused or closed, a paused
+ * one spun up or closed, anything else spun up. Up = serve it again from its
+ * project folder in its original settings — the same file, the same PIN gate (it
+ * travels inside the page) and the same deadline while that deadline is still
+ * ahead. Pause = off the bridge but still active, one click from coming back.
+ * Close = off the bridge and done, so it drops to Finished. Close is the one move
+ * that both changes what OTHERS can reach and ends the row's life, so it asks
+ * once; pause is reversible and does not. */
+
+const ACTION_LABEL = { up: 'Spin up', pause: 'Pause', close: 'Close' }
+const ACTION_BUSY = { up: 'Spinning up…', pause: 'Pausing…', close: 'Closing…' }
+const ACTION_HINT = {
+  up: 'Serve it again, in its original settings',
+  pause: 'Off the bridge, still active — spin it up again any time',
+  close: 'Off the bridge and done — the row moves to Finished'
+}
+
+/** The legal moves for one row: the backend's list, with the older single
+ *  `action` kept as the fallback. `down` is the old name for close. */
+function rowActions(row) {
+  if (!row.controllable) return []
+  const list = Array.isArray(row.actions) && row.actions.length
+    ? row.actions
+    : (row.action === 'up' || row.action === 'down') ? [row.action] : []
+  return list.map(a => (a === 'down' ? 'close' : a)).filter(a => ACTION_LABEL[a])
+}
+
+function ActionButtons({ row, onDone }) {
+  const [busy, setBusy] = useState('')
+  const [confirming, setConfirming] = useState('')
+  const [error, setError] = useState('')
+  const actions = rowActions(row)
+  if (!actions.length) return null
+
+  const send = async action => {
+    setBusy(action)
+    setError('')
+    try {
+      await rest('/action', { method: 'POST', body: { slug: row.slug, action } })
+      setBusy('')
+      setConfirming('')
+      if (onDone) onDone()
+    } catch (e) {
+      setBusy('')
+      setConfirming('')
+      setError(String((e && e.message) || e))
+    }
+  }
+
+  return jsxs('div', {
+    className: 'flex flex-col items-end gap-0.5',
+    children: [
+      jsx('div', {
+        className: 'flex items-center gap-1',
+        children: actions.map(action =>
+          jsx(Button, {
+            key: action,
+            variant: action === actions[0] ? 'secondary' : 'ghost',
+            size: 'xs',
+            disabled: Boolean(busy),
+            title: ACTION_HINT[action],
+            'aria-label': `${ACTION_LABEL[action]} ${row.slug}`,
+            'data-action-slug': row.slug,
+            'data-action-kind': action,
+            onClick: () =>
+              action === 'close' && confirming !== action ? setConfirming(action) : send(action),
+            children: busy === action
+              ? ACTION_BUSY[action]
+              : confirming === action
+                ? 'Confirm close'
+                : ACTION_LABEL[action]
+          }, action)
+        )
+      }),
+      confirming && !busy
+        ? jsx(Button, {
+            variant: 'ghost',
+            size: 'xs',
+            onClick: () => setConfirming(''),
+            children: 'Cancel'
+          })
+        : null,
+      error
+        ? jsx('span', {
+            className: 'max-w-[9rem] text-right text-[0.625rem] text-(--ui-text-tertiary)',
+            children: error
+          })
+        : null
+    ]
+  })
+}
+
 function CahierRow({ row, vocab, onOpen, onSaved }) {
   const [editing, setEditing] = useState(false)
   const meta = [
+    // A lifecycle badge says serving/paused/closed, which is the wrong place for
+    // "how is it doing" — so the phase reads here whenever the badge is not it.
+    row.lifecycle ? STATE_LABEL[row.state] || row.state : null,
     plural(row.saves, 'save', 'saves'),
     row.people ? plural(row.people, 'contributor', 'contributors') : null,
     row.last_save ? `last ${clock(row.last_save)}` : null,
@@ -288,110 +419,131 @@ function CahierRow({ row, vocab, onOpen, onSaved }) {
   return jsxs('div', {
     'data-slug': row.slug,
     className: cn(
-      'flex flex-col gap-1.5 rounded-(--ui-radius-md) border px-3 py-2',
+      'flex items-start gap-3 rounded-(--ui-radius-md) border px-3 py-2',
       row.state === 'live'
         ? 'border-(--ui-accent)'
         : 'border-(--ui-stroke-secondary)'
     ),
     children: [
       jsxs('div', {
-        className: 'flex items-center gap-2',
+        className: 'flex min-w-0 flex-1 flex-col gap-1.5',
         children: [
-          jsx(Badge, {
-            variant: STATE_VARIANT[row.state] || 'muted',
-            size: 'xs',
-            children: STATE_LABEL[row.state] || row.state
-          }),
-          jsx('span', {
-            className: 'truncate text-[0.8125rem] font-medium text-(--ui-text-primary)',
-            children: row.title || row.slug
-          }),
-          row.protected
-            ? jsx(Codicon, {
-                name: 'lock',
-                size: '0.8rem',
-                className: 'text-(--ui-text-tertiary)',
-                title: row.pin_users
-                  ? `PIN-gated · ${plural(row.pin_users, 'user', 'users')}`
-                  : 'PIN-gated'
+          jsxs('div', {
+            className: 'flex min-w-0 items-center gap-2',
+            children: [
+              jsx('span', {
+                className: 'truncate text-[0.8125rem] font-medium text-(--ui-text-primary)',
+                children: row.title || row.slug
+              }),
+              row.protected
+                ? jsx(Codicon, {
+                    name: 'lock',
+                    size: '0.8rem',
+                    className: 'text-(--ui-text-tertiary)',
+                    title: row.pin_users
+                      ? `PIN-gated · ${plural(row.pin_users, 'user', 'users')}`
+                      : 'PIN-gated'
+                  })
+                : null,
+              jsx('span', {
+                className: 'ml-auto truncate font-mono text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: row.slug
               })
-            : null,
-          jsx('span', {
-            className: 'ml-auto font-mono text-[0.6875rem] text-(--ui-text-tertiary)',
-            children: row.slug
-          })
-        ]
-      }),
-      jsx('div', {
-        className: 'text-[0.6875rem] text-(--ui-text-secondary)',
-        children: meta.join(' · ') || 'no activity yet'
-      }),
-      jsxs('div', {
-        className: 'flex items-center gap-2',
-        children: [
-          jsx(FilingTag, { row }),
-          jsx(Button, {
-            variant: 'ghost',
-            size: 'xs',
-            title: 'Say which profile/project this cahier belongs to',
-            'aria-label': `File ${row.slug}`,
-            'data-edit': row.slug,
-            onClick: () => setEditing(v => !v),
-            children: jsx(Codicon, { name: 'edit', size: '0.75rem' })
-          })
-        ]
-      }),
-      row.why
-        ? jsx('div', {
-            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-            children: row.why
-          })
-        : null,
-      editing
-        ? jsx(FilingEditor, {
-            row,
-            vocab,
-            onSaved: () => {
-              setEditing(false)
-              if (onSaved) onSaved()
-            },
-            onCancel: () => setEditing(false)
-          })
-        : null,
-      jsxs('div', {
-        className: 'flex items-center gap-2 pt-0.5',
-        children: [
-          row.url
-            ? jsx(Button, {
-                variant: 'secondary',
-                size: 'xs',
-                title: 'Read it here, in this window',
-                onClick: () => onOpen(row),
-                children: [
-                  jsx(Codicon, { name: 'open-preview', size: '0.8rem' }),
-                  jsx('span', { children: 'Open' })
-                ]
-              })
-            : null,
-          row.url
-            ? jsx(Button, {
+            ]
+          }),
+          jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-secondary)',
+            children: meta.join(' · ') || 'no activity yet'
+          }),
+          jsxs('div', {
+            className: 'flex items-center gap-2',
+            children: [
+              jsx(FilingTag, { row }),
+              jsx(Button, {
                 variant: 'ghost',
                 size: 'xs',
-                title: 'Open in your browser instead',
-                onClick: () => osApi && osApi.openExternal(row.url),
-                children: [
-                  jsx(Codicon, { name: 'link-external', size: '0.8rem' }),
-                  jsx('span', { children: 'Browser' })
-                ]
+                title: 'Say which profile/project this cahier belongs to',
+                'aria-label': `File ${row.slug}`,
+                'data-edit': row.slug,
+                onClick: () => setEditing(v => !v),
+                children: jsx(Codicon, { name: 'edit', size: '0.75rem' })
+              })
+            ]
+          }),
+          row.why
+            ? jsx('div', {
+                className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: row.why
               })
             : null,
-          jsx(CopyLink, { url: row.url }),
-          row.file
-            ? jsx('span', {
-                className: 'truncate font-mono text-[0.625rem] text-(--ui-text-tertiary)',
-                children: row.file
+          editing
+            ? jsx(FilingEditor, {
+                row,
+                vocab,
+                onSaved: () => {
+                  setEditing(false)
+                  if (onSaved) onSaved()
+                },
+                onCancel: () => setEditing(false)
               })
-            : null
+            : null,
+          jsxs('div', {
+            className: 'flex items-center gap-2 pt-0.5',
+            children: [
+              row.url
+                ? jsx(Button, {
+                    variant: 'secondary',
+                    size: 'xs',
+                    title: 'Read it here, in this window',
+                    onClick: () => onOpen(row),
+                    children: [
+                      jsx(Codicon, { name: 'open-preview', size: '0.8rem' }),
+                      jsx('span', { children: 'Open' })
+                    ]
+                  })
+                : null,
+              row.url
+                ? jsx(Button, {
+                    variant: 'ghost',
+                    size: 'xs',
+                    title: 'Open in your browser instead',
+                    onClick: () => osApi && osApi.openExternal(row.url),
+                    children: [
+                      jsx(Codicon, { name: 'link-external', size: '0.8rem' }),
+                      jsx('span', { children: 'Browser' })
+                    ]
+                  })
+                : null,
+              jsx(CopyLink, { url: row.url }),
+              row.file
+                ? jsx('span', {
+                    className: 'truncate font-mono text-[0.625rem] text-(--ui-text-tertiary)',
+                    title: row.home_path
+                      ? `saved in ${row.home_path}`
+                      : row.path,
+                    children: row.file
+                  })
+                : null
+            ]
+          })
+        ]
+      }),
+      /* Right-hand side of the row: the state reads first, the button that
+         changes it sits directly underneath — the two things a human came for. */
+      jsxs('div', {
+        'data-row-status': row.state,
+        'data-row-lifecycle': row.lifecycle || '',
+        className: 'flex shrink-0 flex-col items-end gap-1.5',
+        children: [
+          jsx(Badge, {
+            variant: statusVariant(row),
+            size: 'xs',
+            title: row.lifecycle
+              ? `${row.lifecycle} · ${STATE_LABEL[row.state] || row.state}`
+              : undefined,
+            children: statusLabel(row)
+          }),
+          jsx(ActionButtons, { row, onDone: onSaved })
         ]
       })
     ]
@@ -493,9 +645,9 @@ function Viewer({ row, onBack }) {
             ]
           }),
           jsx(Badge, {
-            variant: STATE_VARIANT[row.state] || 'muted',
+            variant: statusVariant(row),
             size: 'xs',
-            children: STATE_LABEL[row.state] || row.state
+            children: statusLabel(row)
           }),
           jsx('span', {
             className: 'truncate text-[0.8125rem] font-medium text-(--ui-text-primary)',
@@ -568,6 +720,16 @@ function Panel() {
   const [collapsed, setCollapsed] = useState({})
   const [viewing, setViewing] = useState(null)
 
+  // Light/dark is the app's, not ours: `useTheme` is the app's own theme door,
+  // so this button flips the real appearance (and persists it) rather than
+  // skinning only this pane. `renderedMode` is what is actually painted — under
+  // `system` that is the honest answer about which way the toggle goes.
+  const theme = useTheme() || {}
+  const dark = theme.renderedMode === 'dark'
+  const flipTheme = () => {
+    if (typeof theme.setMode === 'function') theme.setMode(dark ? 'light' : 'dark')
+  }
+
   const query = useQuery({
     queryKey: ['cahier-hub', scope],
     queryFn: () => rest(`/list?scope=${encodeURIComponent(scope)}`),
@@ -617,31 +779,48 @@ function Panel() {
           jsxs('span', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             children: [
-              plural(counts.live || 0, 'live', 'live'),
+              plural((counts.lifecycle || {}).serving || 0, 'serving', 'serving'),
               ' · ',
-              plural(counts.pending || 0, 'pending', 'pending'),
+              plural((counts.lifecycle || {}).paused || 0, 'paused', 'paused'),
               ' · ',
               `${counts.total || 0} tracked`
             ]
           }),
-          jsx('span', {
-            className: 'ml-auto',
-            children: jsx(Button, {
-              variant: 'ghost',
-              size: 'xs',
-              title: bridge ? `bridge ${bridge.base}` : 'bridge unknown',
-              onClick: () => query.refetch(),
-              children: [
-                jsx(Codicon, { name: 'refresh', size: '0.8rem' }),
-                jsx('span', {
-                  children: query.isFetching
-                    ? 'Refreshing…'
-                    : bridge && bridge.up
-                      ? 'Bridge up'
-                      : 'Bridge down'
-                })
-              ]
-            })
+          jsxs('span', {
+            className: 'ml-auto flex items-center gap-1',
+            children: [
+              jsx(Button, {
+                variant: 'ghost',
+                size: 'xs',
+                title: bridge ? `bridge ${bridge.base}` : 'bridge unknown',
+                onClick: () => query.refetch(),
+                children: [
+                  jsx(Codicon, { name: 'refresh', size: '0.8rem' }),
+                  jsx('span', {
+                    children: query.isFetching
+                      ? 'Refreshing…'
+                      : bridge && bridge.up
+                        ? 'Bridge up'
+                        : 'Bridge down'
+                  })
+                ]
+              }),
+              // Rightmost control in the header = top right of the pane. Icons
+              // are Tabler outline glyphs (stroke, no fill): monochrome, inherits
+              // currentColor, so it reads the same in either mode.
+              jsx(Button, {
+                variant: 'ghost',
+                size: 'icon-xs',
+                title: dark ? 'Switch to light mode' : 'Switch to dark mode',
+                'aria-label': dark ? 'Switch to light mode' : 'Switch to dark mode',
+                'aria-pressed': dark,
+                'data-theme-toggle': dark ? 'dark' : 'light',
+                onClick: flipTheme,
+                children: dark
+                  ? jsx(icons.Sun, { className: 'size-3.5', stroke: 1.75, 'aria-hidden': true })
+                  : jsx(icons.Moon, { className: 'size-3.5', stroke: 1.75, 'aria-hidden': true })
+              })
+            ]
           })
         ]
       }),

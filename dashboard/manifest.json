@@ -1,8 +1,8 @@
 {
   "name": "cahier-hub",
   "label": "Cahiers",
-  "description": "Cahier index grouped by profile ▸ project: state, saves, deadline, PIN flags, served link. Open in-window or in the browser, and record which profile/project a cahier belongs to. Iterates through cahier_ctl.py (the same path the CLI uses).",
-  "version": "0.2.0",
+  "description": "Cahier index grouped by profile \u25b8 project: state, saves, deadline, PIN flags, served link. Open in-window or in the browser, and record which profile/project a cahier belongs to. Iterates through cahier_ctl.py (the same path the CLI uses).",
+  "version": "0.5.0",
   "icon": "notebook",
   "api": "plugin_api.py",
   "tab": {

@@ -1,7 +1,45 @@
 name: cahier-hub
-version: "0.2.0"
-description: "Every cahier in one sidebar page — grouped by profile ▸ project, read in-window, live + pending first, with saves, deadlines, PIN flags and the served link. Iterates through cahier_ctl.py so the panel and the CLI can never disagree. Zero API keys, zero model tokens."
-author: hermes
+version: "0.5.0"
+manifest_version: 2
+api_version: 1
+description: "Every cahier in one sidebar page — grouped by profile ▸ project, read in-window, live + pending first, with saves, deadlines, PIN flags and the served link. Iterates through the cahier control plane so the panel and the CLI can never disagree. Zero API keys, zero model tokens."
+author: SmoothMarx
+license: MIT
+homepage: https://hermes-agent.nousresearch.com/docs/plugins/cahier-hub
 kind: standalone
-requires_hermes: ">=0.19"
+# Floor = the release this plugin was built and validated against. Raise it only
+# with evidence: the loader skips the plugin when the constraint is unmet, and a
+# floor lower than the APIs actually used installs a broken copy.
+requires_hermes: ">=0.21.5"
 platforms: []
+tags: [cahier, dashboard, desktop, forms, self-hosted]
+# Nothing runs in the agent process (see __init__.py): no tools, no hooks, no
+# middleware, no env vars. Declared explicitly so the catalog's
+# "declared capabilities must match reality" check has something to compare.
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []
+# Settings live at plugins.entries.cahier-hub.settings.<key> in config.yaml and
+# drive the Desktop Plugins settings form. The same keys are read from
+# $HERMES_HOME/cahier-hub.json (written by the in-session onboarding questions)
+# and from CAHIER_HUB_<KEY> environment variables; environment wins, then
+# config.yaml, then the onboarding answers, then these defaults. GET /doctor
+# prints which layer supplied each value.
+config_schema:
+  bridge_port:      {type: int,   default: 8766, description: "Port the static bridge serves cahiers on"}
+  base_url:         {type: str,   default: "",   description: "The URL answerers actually open, e.g. http://192.168.1.20:8766/ — leave empty to derive it from the request host"}
+  cache_ttl:        {type: float, default: 5.0,  description: "Seconds the panel caches the cahier list"}
+  control_plane:    {type: str,   default: "",   description: "Path to cahier_ctl.py; empty searches $HERMES_HOME/scripts/ then the bundled copy"}
+  groups_file:      {type: str,   default: "",   description: "Where profile/project filings are stored; empty uses the control plane's own path"}
+  share_dir:        {type: str,   default: "",   description: "Folder the bridge serves; empty uses ~/cahier-share"}
+  projects_root:    {type: str,   default: "",   description: "Where cahiers are filed by project; empty uses ~/Projects"}
+  hosting_mode:     {type: str,   default: "lan", description: "local | lan | public — where answerers open the page from; 'public' implies a PIN"}
+  timezone:         {type: str,   default: "",   description: "Timezone for deadlines; empty uses the host's"}
+  notify_channel:   {type: str,   default: "none", description: "none | telegram | email | webhook — where submitted answers are announced"}
+  notify_target:    {type: str,   default: "",   description: "The chat, address or URL behind notify_channel"}
+  notify_on:        {type: str,   default: "new_answer", description: "new_answer | deadline | silent — what a notification is about"}
+  quiet_hours:      {type: str,   default: "",   description: "No notifications inside this window, e.g. 22:00-07:00"}
+  pin_enabled:      {type: bool,  default: false, description: "Require a PIN to open a cahier"}
+  users:            {type: list,  default: [],   description: "Who answers: [{\"name\": \"...\"}] — names only, PINs travel inside the page"}

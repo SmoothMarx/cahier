@@ -10,8 +10,12 @@
  *     without dropping one, and switching the grouping restores the default;
  *   - "Open" frames the served URL in this window, "Browser" is the escape
  *     hatch to the real browser, "Copy link" hits the clipboard;
- *   - a row's ✎ POSTs the human's profile/project to /filing — and that POST is
- *     the ONLY non-read call the page ever makes.
+ *   - each row's lifecycle badge (serving / paused / closed) reads at its RIGHT
+ *     edge, with one button per legal move directly underneath it;
+ *   - those buttons POST /action with the slug and the verb (up | pause | close),
+ *     and Close asks once before it ends the row;
+ *   - a row's ✎ POSTs the human's profile/project to /filing;
+ *   - /filing and /action are the ONLY non-read calls the page ever makes.
  *
  *   node tests/plugin_harness.mjs <fixture.json>
  *
@@ -35,7 +39,8 @@ const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'))
 
 /* ------------------------------------------------------------ stub packages */
 
-const WORK = path.join(os.homedir(), '.hermes', 'cache', 'scratch', 'cahier-hub-js')
+const WORK = process.env.CAHIER_HUB_JS_WORK
+  || path.join(os.tmpdir(), 'cahier-hub-js')   /* run.sh points this at its scratch dir */
 fs.rmSync(WORK, { recursive: true, force: true })
 const NM = path.join(WORK, 'node_modules')
 fs.mkdirSync(path.join(NM, '@hermes', 'plugin-sdk'), { recursive: true })
@@ -89,6 +94,31 @@ export const useQuery = () => ({
   error: null,
   refetch: () => { globalThis.__REFETCHED__ = (globalThis.__REFETCHED__ || 0) + 1 }
 })
+// Outline glyph stub: renders as an <svg data-icon=...> so the walk can see
+// which icon the toggle picked, and passes stroke/fill through untouched.
+export const icons = new Proxy({}, {
+  get: (_t, name) => (p => jsx('svg', {
+    'data-icon': String(name),
+    className: (p || {}).className,
+    stroke: (p || {}).stroke,
+    fill: (p || {}).fill,
+    children: null
+  }))
+})
+export const useTheme = () => {
+  const mode = globalThis.__CAHIER_THEME__ || 'light'
+  return {
+    mode,
+    resolvedMode: mode,
+    renderedMode: mode,
+    themes: [],
+    theme: null,
+    setMode: next => {
+      globalThis.__CAHIER_THEME__ = next
+      globalThis.__CAHIER_SETMODE__ = (globalThis.__CAHIER_SETMODE__ || []).concat(next)
+    }
+  }
+}
 `)
 
 pkg('react', { name: 'react', type: 'module', exports: { '.': './index.js', './jsx-runtime': './jsx-runtime.js' } })
@@ -100,6 +130,9 @@ fs.copyFileSync(PLUGIN_SRC, pluginCopy)
 /* ----------------------------------------------------------------- harness */
 
 globalThis.__CAHIER_FIXTURE__ = fixture
+// Start the harness in dark: the toggle must then offer light mode, which is
+// the direction a human actually notices. __CAHIER_SETMODE__ records the ask.
+globalThis.__CAHIER_THEME__ = 'dark'
 let clipboard = []
 // Node 22 ships a getter-only global `navigator`; override the descriptor.
 Object.defineProperty(globalThis, 'navigator', {
@@ -293,7 +326,91 @@ if (copyButtons.length) {
   check(clipboard.length === 1, 'Copy link writes the served URL to the clipboard', clipboard[0])
 }
 
-/* ----------------------------------------- filing: the panel's only write path */
+/* ------------------------------- actions: status on the right, buttons under it */
+
+const rightCells = []
+walk(regrouped, n => { if (n.props && n.props['data-row-status'] !== undefined) rightCells.push(n) })
+check(rightCells.length === fixture.rows.length, 'every row carries a right-hand status cell',
+  `${rightCells.length}/${fixture.rows.length}`)
+
+const stateReadsFirst = rightCells.every(cell => {
+  const kids = Array.isArray(cell.props.children) ? cell.props.children : [cell.props.children]
+  return textOf(kids[0]).join('').trim().length > 0
+})
+check(stateReadsFirst, 'the state reads first in that cell, the buttons sit underneath it')
+
+/* The badge reads the LIFECYCLE (what the buttons act on), not the phase. */
+const badgeLabel = cell => textOf(cell.props.children[0]).join('').trim()
+const lifeCells = rightCells.filter(c => c.props['data-row-lifecycle'])
+check(lifeCells.every(c => badgeLabel(c) === c.props['data-row-lifecycle']),
+  'the badge reads the lifecycle: serving / paused / closed',
+  lifeCells.map(c => `${c.props['data-row-lifecycle']}→${badgeLabel(c)}`).join(', '))
+const bareCells = rightCells.filter(c => c.props['data-row-lifecycle'] === '')
+check(bareCells.every(c => badgeLabel(c).length > 0),
+  'a page that was never published still shows its phase', `${bareCells.length} without a lifecycle`)
+
+/* Every legal move is a button, and nothing else is. */
+const legal = row => (Array.isArray(row.actions) && row.actions.length
+  ? row.actions
+  : (row.action === 'up' || row.action === 'down') ? [row.action] : [])
+const wanted = fixture.rows.filter(r => r.controllable)
+  .map(r => legal(r).length).reduce((a, b) => a + b, 0)
+const actionBtns = []
+walk(regrouped, n => { if (n.props && n.props['data-action-kind']) actionBtns.push(n) })
+check(actionBtns.length === wanted, 'one button per legal move, none for the rest',
+  `${actionBtns.length} buttons for ${wanted} legal moves`)
+
+const wrongKind = actionBtns.filter(b => {
+  const row = fixture.rows.find(r => r.slug === b.props['data-action-slug'])
+  return !row || !legal(row).includes(b.props['data-action-kind'])
+})
+check(wrongKind.length === 0, 'the buttons follow the row: serving → Pause + Close, parked → Spin up',
+  wrongKind.map(b => b.props['data-action-slug']).join(',') || `${actionBtns.length} match`)
+
+const btnFor = (slug, kind) =>
+  actionBtns.find(b => b.props['data-action-slug'] === slug && b.props['data-action-kind'] === kind)
+const pausedRow = fixture.rows.find(r => r.controllable && r.lifecycle === 'paused')
+const servingRow = fixture.rows.find(r => r.controllable && r.lifecycle === 'serving')
+const parkedRow = fixture.rows.find(r => r.controllable && r.lifecycle !== 'serving')
+
+if (pausedRow) {
+  check(Boolean(btnFor(pausedRow.slug, 'up')) && Boolean(btnFor(pausedRow.slug, 'close'))
+    && !btnFor(pausedRow.slug, 'pause'),
+    'a paused cahier offers Spin up + Close, never Pause', pausedRow.slug)
+} else {
+  console.log('  note  no paused cahier in this fixture — the Paused row is not exercised')
+}
+
+if (servingRow) {
+  check(Boolean(btnFor(servingRow.slug, 'pause')) && Boolean(btnFor(servingRow.slug, 'close')),
+    'a serving cahier offers Pause + Close', servingRow.slug)
+  const btn = btnFor(servingRow.slug, 'close')
+  btn.props.onClick()
+  const asked = rerender()
+  check(buttonsIn(asked, 'Confirm close').length === 1,
+    'Close asks once before it ends the row')
+  await buttonsIn(asked, 'Confirm close')[0].props.onClick()
+  const post = calls.filter(c => c.path === '/action').pop()
+  check(Boolean(post) && post.opts.method === 'POST'
+    && post.opts.body.slug === servingRow.slug && post.opts.body.action === 'close',
+    'Close POSTs /action with the slug and the verb', JSON.stringify(post && post.opts.body))
+} else {
+  console.log('  note  no serving controllable cahier in this fixture — Close not clicked')
+}
+
+if (parkedRow) {
+  const btn = btnFor(parkedRow.slug, 'up')
+  check(Boolean(btn), 'a cahier that is off the bridge offers Spin up', parkedRow.slug)
+  btn.props.onClick()
+  const post = calls.filter(c => c.path === '/action').pop()
+  check(Boolean(post) && post.opts.method === 'POST'
+    && post.opts.body.slug === parkedRow.slug && post.opts.body.action === 'up',
+    'Spin up POSTs /action with the slug and the verb', JSON.stringify(post && post.opts.body))
+} else {
+  console.log('  note  no parked controllable cahier in this fixture — Spin up not clicked')
+}
+
+/* ----------------------------------------- filing: a human's label on a row */
 
 const rowSlug = fixture.rows[0].slug
 let editBtn = null
@@ -310,7 +427,7 @@ if (editBtn) {
   check(inputs.length === 2, 'the editor asks for profile + project', `${inputs.length} fields`)
   if (inputs.length >= 2) {
     inputs[0].props.onChange({ target: { value: 'dobbs' } })
-    inputs[1].props.onChange({ target: { value: 'Pharmacy' } })
+    inputs[1].props.onChange({ target: { value: 'Demo' } })
     const saveBtn = buttonsIn(rerender(), 'Save')[0]
     check(Boolean(saveBtn), 'the editor has a Save button')
     if (saveBtn) {
@@ -320,15 +437,79 @@ if (editBtn) {
       check(Boolean(post) && post.opts.method === 'POST', 'the write names its method',
         post && String(post.opts.method))
       check(Boolean(post) && post.opts.body && post.opts.body.slug === rowSlug
-        && post.opts.body.profile === 'dobbs' && post.opts.body.project === 'Pharmacy',
+        && post.opts.body.profile === 'dobbs' && post.opts.body.project === 'Demo',
         'the write carries the slug and the human labels', JSON.stringify(post && post.opts.body))
     }
   }
 }
 
+/* ---------------------------------------- light/dark toggle (appearance door) */
+
+const iconOf = node => {
+  let hit = null
+  walk(node, n => { if (!hit && n.props && n.props['data-icon']) hit = n })
+  return hit
+}
+
+const themeToggles = []
+walk(regrouped, n => { if (n.props && n.props['data-theme-toggle']) themeToggles.push(n) })
+check(themeToggles.length === 1, 'exactly one light/dark toggle in the panel',
+  `${themeToggles.length} toggles`)
+
+const toggle = themeToggles[0]
+if (toggle) {
+  // "top right" = the toggle is the last control in the header's right-hand cluster.
+  const clusters = []
+  walk(regrouped, n => {
+    if (n.props && typeof n.props.className === 'string' && n.props.className.includes('ml-auto')) clusters.push(n)
+  })
+  const rightCluster = clusters.find(c => Array.isArray(c.props.children) &&
+    c.props.children[c.props.children.length - 1] === toggle)
+  check(Boolean(rightCluster), 'the toggle is the rightmost control in the header (top right)')
+
+  const labelDark = String(toggle.props['aria-label'] || '')
+  check(labelDark.toLowerCase().includes('light') && toggle.props['aria-pressed'] === true,
+    'in dark mode the toggle offers light mode and reads as pressed',
+    `${labelDark} / aria-pressed=${toggle.props['aria-pressed']}`)
+
+  const iconDark = iconOf(toggle)
+  check(iconDark && String(iconDark.props['data-icon']) === 'Sun',
+    'in dark mode the toggle shows the sun (the mode it switches to)',
+    iconDark && String(iconDark.props['data-icon']))
+  check(iconDark && iconDark.props.stroke !== undefined && iconDark.props.fill === undefined,
+    'the icon is an outline glyph: stroke set, no fill (monochrome)',
+    iconDark && `stroke=${iconDark.props.stroke} fill=${iconDark.props.fill}`)
+
+  delete globalThis.__CAHIER_SETMODE__
+  toggle.props.onClick()
+  check(globalThis.__CAHIER_SETMODE__ && globalThis.__CAHIER_SETMODE__[0] === 'light',
+    'clicking in dark mode asks the app for light mode',
+    `${(globalThis.__CAHIER_SETMODE__ || []).join(',') || 'no setMode call'}`)
+}
+
+// The other direction: light mode must offer dark, with the moon.
+globalThis.__CAHIER_THEME__ = 'light'
+react.__reset()
+const lightTree = expand(routes[0].render())
+const lightToggles = []
+walk(lightTree, n => { if (n.props && n.props['data-theme-toggle']) lightToggles.push(n) })
+const lit = lightToggles[0]
+check(lightToggles.length === 1 && String(lit.props['aria-label']).toLowerCase().includes('dark'),
+  'in light mode the toggle offers dark mode', lit && String(lit.props['aria-label']))
+const iconLight = lit && iconOf(lit)
+check(iconLight && String(iconLight.props['data-icon']) === 'Moon',
+  'in light mode the toggle shows the moon', iconLight && String(iconLight.props['data-icon']))
+delete globalThis.__CAHIER_SETMODE__
+if (lit) lit.props.onClick()
+check(globalThis.__CAHIER_SETMODE__ && globalThis.__CAHIER_SETMODE__[0] === 'dark',
+  'clicking in light mode asks the app for dark mode',
+  `${(globalThis.__CAHIER_SETMODE__ || []).join(',') || 'no setMode call'}`)
+globalThis.__CAHIER_THEME__ = 'dark'
+
 const writes = calls.filter(c => c.path !== '/list')
-check(writes.every(c => c.path === '/filing' && c.opts.method === 'POST'),
-  'the panel never writes anywhere except /filing', writes.map(c => `${c.opts.method || 'GET'} ${c.path}`).join(',') || 'no writes')
+check(writes.every(c => (c.path === '/filing' || c.path === '/action') && c.opts.method === 'POST'),
+  'the panel writes nothing except the human\'s /filing and /action',
+  writes.map(c => `${c.opts.method || 'GET'} ${c.path}`).join(',') || 'no writes')
 check(calls.filter(c => c.path.startsWith('/list')).every(c => !c.opts.method || c.opts.method === 'GET'),
   'listing is always a plain GET')
 

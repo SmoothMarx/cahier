@@ -76,4 +76,8 @@ def test_active_scope_never_exceeds_all_scope(client):
     allr = client.get(f"{PREFIX}/list", params={"scope": "all"}).json()["rows"]
     act = client.get(f"{PREFIX}/list", params={"scope": "active"}).json()["rows"]
     assert {r["slug"] for r in act} <= {r["slug"] for r in allr}
-    assert all(r["state"] in ("live", "pending") for r in act), "active scope leaked a finished cahier"
+    assert all(r["lifecycle"] == "serving" for r in act), \
+        "active scope must mean exactly 'on the bridge'"
+    paused = client.get(f"{PREFIX}/list", params={"scope": "paused"}).json()["rows"]
+    assert all(r["lifecycle"] == "paused" for r in paused), "paused scope leaked a row"
+    assert not ({r["slug"] for r in act} & {r["slug"] for r in paused})
