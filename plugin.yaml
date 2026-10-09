@@ -5,7 +5,10 @@ api_version: 1
 description: "Every cahier in one sidebar page — grouped by profile ▸ project, read in-window, live + pending first, with saves, deadlines, PIN flags and the served link. Iterates through the cahier control plane so the panel and the CLI can never disagree. Zero API keys, zero model tokens."
 author: SmoothMarx
 license: MIT
-homepage: https://hermes-agent.nousresearch.com/docs/plugins/cahier
+# Pointing at the docs page only once it exists: the catalog PR generates
+# https://hermes-agent.nousresearch.com/docs/plugins/cahier, which returns 404
+# today, and a manifest must not claim a page that isn't there.
+homepage: https://github.com/SmoothMarx/cahier
 kind: standalone
 # Floor = the release this plugin was built and validated against. Raise it only
 # with evidence: the loader skips the plugin when the constraint is unmet, and a
