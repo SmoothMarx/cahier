@@ -230,10 +230,13 @@ The harness runs against `scope=active` (what the page opens with) and
 
 What a user should know before installing (admission-policy terms):
 
-- **Network.** No outbound calls. The dashboard half answers on hermes-serve's
-  own origin (`/api/plugins/cahier/*`) and reads local files. A bridge, if
-  you run one, listens on your LAN so answerers can open a cahier — that is the
-  only listener. No telemetry, no analytics, no update pings, no third party.
+- **Network.** No third-party calls: no telemetry, no analytics, no update pings.
+  The only requests go to **your own** bridge — a 1.5 s loopback health probe so
+  the panel can badge whether it is up, and two probes of the same bridge from
+  `GET /doctor` (a GET, plus a POST to its `/save` to prove the token gate
+  answers before you rely on it). A bridge, if you run one, listens on your LAN
+  so answerers can open a cahier — that is the only listener. Nothing here
+  reaches a host you did not configure.
 - **Reads outside its own data.** The cahier files and the profile/project
   filings in the folders you configure (`share_dir`, `projects_root`,
   `groups_file`), plus the control plane at `$HERMES_HOME/scripts/cahier_ctl.py`
@@ -241,10 +244,19 @@ What a user should know before installing (admission-policy terms):
   files or token stores.
 - **Writes.** Inside `$HERMES_HOME` (its own state) and the folders you
   configure. It never writes into Hermes core files or another plugin's
-  directory.
-- **Shell.** It spawns one local Python process — the control plane
-  (`cahier_ctl.py`), the same call the CLI's `list` makes. Nothing else, and no
-  `--yolo`/non-interactive flags are propagated to children.
+  directory. When `HERMES_HOME` is not `~/.hermes` it re-points the path
+  constants of *its own* bundled control-plane module at that home (`setattr`
+  on the module it just imported, only on names that already exist, never on
+  Hermes core) so the panel and the CLI read the same files.
+- **Shell.** Fixed-argv local commands: no shell (`shell=True` is never used),
+  no `--yolo`/non-interactive flag propagated to a child, every call carrying
+  its own timeout (15 s / 30 s) and `check=False`. There are three, and only
+  these: `systemctl --user is-active <unit>` for the health strip,
+  `systemctl --user stop cahier-deadline.timer` when you pause or close a cahier
+  that had a deadline, and `python3 …/arm-deadline.py --slug … --at …` when you
+  spin one back up (that script belongs to the `cahier` skill; a missing one is
+  reported, never guessed at). The control plane itself is **imported, not
+  spawned** — same module, same process as the panel.
 - **Background processes.** None. The bridge is a service you run yourself; the
   plugin neither bundles nor starts it.
 - **Credentials.** None required: zero API keys, zero model tokens, empty

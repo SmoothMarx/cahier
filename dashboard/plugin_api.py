@@ -305,6 +305,11 @@ def _apply_home(module: Any) -> list[str]:
         layout["PROJECTS"] = Path(os.path.expanduser(str(cfg["projects_root"])))
     if str(cfg.get("groups_file") or "").strip():
         layout["GROUPS"] = Path(os.path.expanduser(str(cfg["groups_file"])))
+    # These are OUR OWN bundled control-plane module's path constants — the same
+    # module the CLI runs, never a Hermes core object. Only names that already
+    # exist are touched: no new attributes, no wrapping, no rebinding of core
+    # anything. This is what keeps the panel and the CLI reading the same files
+    # when HERMES_HOME is not ~/.hermes (and it is disclosed in the README).
     for name, value in layout.items():
         if hasattr(module, name):
             setattr(module, name, str(value))
